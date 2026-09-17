@@ -11,7 +11,7 @@ echo "==> 1/7 Пакеты системы"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq python3 python3-venv python3-dev build-essential \
-    ca-certificates curl tzdata sqlite3 ufw
+    ca-certificates curl tzdata sqlite3 ufw libffi-dev pkg-config
 
 echo "==> 2/7 Пользователь $APP_USER"
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin "$APP_USER"
