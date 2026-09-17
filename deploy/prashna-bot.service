@@ -1,0 +1,37 @@
+[Unit]
+Description=Prashna Telegram Bot (Vedic horary astrology)
+Documentation=https://t.me/BotFather
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=prashna
+Group=prashna
+WorkingDirectory=/opt/prashna-bot
+EnvironmentFile=/opt/prashna-bot/.env
+ExecStart=/opt/prashna-bot/.venv/bin/python /opt/prashna-bot/run.py
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+# логи в journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=prashna-bot
+
+# базовая изоляция
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/prashna-bot/data
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,79 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]        # мерж PR в main = push в main = деплой
+  workflow_dispatch:        # плюс кнопка «запустить вручную» в интерфейсе GitHub
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Проверка кода
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Синтаксис
+        run: python -m compileall -q app run.py
+
+      - name: Установка зависимостей
+        run: pip install -r requirements.txt
+
+      - name: Проверка расчёта карты
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone
+          from app.astro.chart import build_chart
+          from app.astro.prashna import render_chart_text, judgment_factors, detect_house
+
+          house = detect_house("получу ли я оффер на новую работу")
+          assert house == 10, f"дом вопроса определён неверно: {house}"
+
+          c = build_chart(datetime.now(timezone.utc), 56.5, 84.97, "Asia/Tomsk", "Томск", house)
+          text = render_chart_text(c)
+          factors = judgment_factors(c)
+
+          assert "Лагна:" in text and len(factors) > 8
+          assert len(c.planets) == 9 and len(c.vargas) == 8
+          print("Карта считается корректно, факторов:", len(factors))
+          PY
+
+  deploy:
+    name: Деплой на VPS
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Настройка SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${{ secrets.SSH_PORT || 22 }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Загрузка кода на сервер
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT || 22 }}" \
+            --exclude '.git' --exclude '.github' --exclude 'data' --exclude '.env' \
+            ./ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/opt/prashna-bot/incoming/"
+
+      - name: Применение и перезапуск
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.SSH_PORT || 22 }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "sudo /opt/prashna-bot/deploy/apply.sh"
+
+      - name: Проверка, что бот поднялся
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.SSH_PORT || 22 }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "systemctl is-active prashna-bot"
