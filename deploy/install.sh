@@ -35,6 +35,8 @@ if [ ! -f "$APP_DIR/.env" ]; then
     echo "    ! Заполните $APP_DIR/.env (TELEGRAM_TOKEN и GROQ_API_KEY), затем перезапустите сервис."
 fi
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+# incoming принадлежит deployer (если автодеплой уже настроен) — иначе rsync из GitHub упрётся в права
+id -u deployer >/dev/null 2>&1 && chown -R deployer:deployer "$APP_DIR/incoming" 2>/dev/null || true
 chmod 600 "$APP_DIR/.env"
 
 echo "==> 6/7 systemd"
