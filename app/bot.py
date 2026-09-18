@@ -132,11 +132,15 @@ def register(dp: Dispatcher) -> None:
 
     @dp.message(Command("me"))
     async def me(msg: Message) -> None:
+        is_admin = msg.from_user.id in settings.admin_ids
         place = await _place_for(msg.from_user.id)
-        left = db.remaining(msg.from_user.id, settings.daily_limit)
+        if is_admin:
+            left = "∞ <b>безлимит</b>"
+        else:
+            left = db.remaining(msg.from_user.id, settings.daily_limit)
         await msg.answer(
             f"Место: <b>{html.escape(place.name)}</b> ({place.lat:.3f}, {place.lon:.3f}, {place.tz})\n"
-            f"Осталось прашн сегодня: <b>{left}</b> из {settings.daily_limit}\n"
+            f"Осталось прашн сегодня: {left}\n"
             f"Аянамша: {settings.ayanamsa}"
         )
 
@@ -195,11 +199,12 @@ def register(dp: Dispatcher) -> None:
             await msg.answer("Вопрос слишком длинный. Уложитесь в 500 символов и задайте одну тему.")
             return
 
-        ok, reason = db.check_and_bump(msg.from_user.id, settings.daily_limit,
-                                       settings.cooldown_seconds)
-        if not ok:
-            await msg.answer(reason)
-            return
+        if msg.from_user.id not in settings.admin_ids:
+            ok, reason = db.check_and_bump(msg.from_user.id, settings.daily_limit,
+                                           settings.cooldown_seconds)
+            if not ok:
+                await msg.answer(reason)
+                return
 
         db.upsert_user(msg.from_user.id, msg.from_user.username)
         place = await _place_for(msg.from_user.id)
@@ -244,8 +249,12 @@ def register(dp: Dispatcher) -> None:
         text = html.escape(answer)
         for chunk in _chunks(text, 3800):
             await msg.answer(chunk)
+        if msg.from_user.id in settings.admin_ids:
+            left_txt = "∞ безлимит"
+        else:
+            left_txt = str(db.remaining(msg.from_user.id, settings.daily_limit))
         await msg.answer(f"Полная карта: <code>/chart {pid}</code> · "
-                         f"осталось сегодня: {db.remaining(msg.from_user.id, settings.daily_limit)}")
+                         f"осталось сегодня: {left_txt}")
 
     @dp.message()
     async def fallback(msg: Message) -> None:
