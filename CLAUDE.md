@@ -1,0 +1,85 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project
+
+Telegram bot (aiogram 3, long polling) that casts a Vedic horary chart (prashna kundali) for the
+moment a question arrives and sends it to Groq for interpretation. Russian-language domain: code,
+comments, identifiers in astro modules, and all user-facing strings are Russian. Keep new strings
+Russian too.
+
+## Commands
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env          # fill TELEGRAM_TOKEN, GROQ_API_KEY; set DB_PATH=./data/prashna.sqlite3
+python run.py                 # entry point; validate() exits if required env vars are missing
+```
+
+Astro-only check (no Telegram, no Groq):
+
+```bash
+python3 -c "
+from datetime import datetime, timezone
+from app.astro.chart import build_chart
+from app.astro.prashna import render_chart_text, judgment_factors
+c = build_chart(datetime.now(timezone.utc), 56.5, 84.97, 'Asia/Tomsk', 'Томск', 10)
+print(render_chart_text(c)); print(); print('\n'.join(judgment_factors(c)))
+"
+```
+
+There is no test suite and no linter. The only automated gate is `.github/workflows/deploy.yml` →
+job `check`: `python -m compileall -q app run.py` plus an inline smoke script asserting
+`detect_house("получу ли я оффер на новую работу") == 10`, 9 planets, 8 vargas, and >8 judgment
+factors. Run that script locally before pushing — a failure there blocks deploy.
+
+## Architecture
+
+Data flows one way: **Telegram → geo → chart → factors → LLM → SQLite → Telegram.**
+
+- `app/bot.py` — all aiogram handlers registered in one `register(dp)` function; `run()` wires
+  logging, DB init, and polling. The catch-all `F.text & ~F.text.startswith("/")` handler is the
+  prashna path: rate-limit check → `detect_house` → `build_chart` (in `asyncio.to_thread`, since
+  pyswisseph is blocking) → send short chart → `llm.interpret` → persist → send answer in
+  3800-char chunks. Chart is sent to the user *before* the LLM call, so an LLM outage still
+  leaves the user with a chart.
+- `app/astro/chart.py` — pure computation via Swiss Ephemeris. Sidereal zodiac, whole-sign houses
+  (`swe.houses_ex(..., b"W", ...)`), `FLG_MOSEPH` so **no ephemeris data files are needed**.
+  Produces one `PrashnaChart` holding planets, vargas D1/D2/D3/D4/D7/D9/D10/D12, aspects, arudhas,
+  Vimshottari dasha, panchanga, house lords.
+- `app/astro/prashna.py` — interpretation *inputs*: `detect_house` (keyword scoring over
+  `C.HOUSE_KEYWORDS`, weighted by matched-word length, falls back to house 1),
+  `judgment_factors` (classical yes/no factors as Russian sentences), and the three renderers
+  (`render_chart_text` for LLM + archive, `render_short` for the Telegram summary).
+- `app/astro/constants.py` — every astrological table (signs, lords, nakshatras, dignities,
+  combustion orbs, special aspects, Vimshottari years, house meanings/keywords, panchanga names).
+  Tuning bhava detection or dignity rules means editing this file, not the logic.
+- `app/llm.py` — Groq via the OpenAI-compatible `/chat/completions` endpoint over raw `httpx`
+  (no SDK). Retries 3×, honors `retry-after` on 429, optional `LLM_PROXY`.
+- `app/db.py` — plain `sqlite3` with a `@contextmanager conn()` that commits on exit and sets
+  WAL. Schema is idempotent DDL in the `SCHEMA` string executed by `init()`; there are no
+  migrations, so schema changes must stay backward compatible or add a table.
+- `app/geo.py` — Nominatim geocoding, results cached in the `geocache` table, throttled to ≤1
+  req/sec by a module-level `asyncio.Lock` + `_last_call`. `timezonefinder` derives the tz offline.
+
+**Core invariant: the LLM computes nothing.** Every position, varga, arudha, dasha, and panchanga
+value is produced by code; Groq only interprets the finished chart. The system prompt in
+`app/llm.py` states this explicitly — don't move calculation into the prompt.
+
+Config is a single frozen `Settings` dataclass in `app/config.py`, read from env/`.env` at import.
+Because defaults are evaluated at class-definition time, tests or scripts must set env vars before
+importing `app.config`.
+
+## Deploy
+
+`main` is the deploy branch: push (or merged PR) → `check` job → rsync to
+`/opt/prashna-bot/incoming` → `sudo deploy/apply.sh` on the VPS, which backs up the current code,
+swaps it in, reinstalls deps, restarts the systemd unit, and **auto-rolls back** if
+`systemctl is-active` fails. `deploy/install.sh` is first-time VPS setup; `deploy/update.sh` is
+the manual equivalent of `apply.sh`. `.env` and `data/` live only on the server and are excluded
+from rsync.
+
+`.gitattributes` forces LF (`* text=auto eol=lf`, `*.sh text eol=lf`) — the shell scripts break on
+the VPS with CRLF, so never commit CRLF line endings.
