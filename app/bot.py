@@ -1,4 +1,5 @@
 """Telegram-бот прашна-гороскопа (aiogram 3)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +15,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
-    BufferedInputFile, KeyboardButton, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove,
+    BufferedInputFile,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
 )
 
 from . import db, geo, llm
@@ -56,7 +61,8 @@ class Form(StatesGroup):
 def _location_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📍 Отправить геолокацию", request_location=True)]],
-        resize_keyboard=True, one_time_keyboard=True,
+        resize_keyboard=True,
+        one_time_keyboard=True,
     )
 
 
@@ -91,9 +97,11 @@ def register(dp: Dispatcher) -> None:
         arg = (msg.text or "").partition(" ")[2].strip()
         if not arg:
             await state.set_state(Form.waiting_city)
-            await msg.answer("Напишите город, из которого вы задаёте вопрос "
-                             "(например: <code>Томск</code>), или пришлите геолокацию.",
-                             reply_markup=_location_kb())
+            await msg.answer(
+                "Напишите город, из которого вы задаёте вопрос "
+                "(например: <code>Москва</code>), или пришлите геолокацию.",
+                reply_markup=_location_kb(),
+            )
             return
         await _set_city(msg, arg, state)
 
@@ -105,11 +113,19 @@ def register(dp: Dispatcher) -> None:
         await msg.bot.send_chat_action(msg.chat.id, ChatAction.TYPING)
         place = await geo.geocode(query)
         if not place:
-            await msg.answer("Не нашёл такой город. Попробуйте иначе "
-                             "(например «Нижний Новгород, Россия») или пришлите геолокацию.")
+            await msg.answer(
+                "Не нашёл такой город. Попробуйте иначе "
+                "(например «Нижний Новгород, Россия») или пришлите геолокацию."
+            )
             return
-        db.upsert_user(msg.from_user.id, msg.from_user.username,
-                       place=place.name, lat=place.lat, lon=place.lon, tz=place.tz)
+        db.upsert_user(
+            msg.from_user.id,
+            msg.from_user.username,
+            place=place.name,
+            lat=place.lat,
+            lon=place.lon,
+            tz=place.tz,
+        )
         await state.clear()
         await msg.answer(
             f"Место установлено: <b>{html.escape(place.name)}</b>\n"
@@ -121,12 +137,20 @@ def register(dp: Dispatcher) -> None:
     @dp.message(F.location)
     async def location(msg: Message, state: FSMContext) -> None:
         place = geo.place_from_coords(msg.location.latitude, msg.location.longitude)
-        db.upsert_user(msg.from_user.id, msg.from_user.username,
-                       place=place.name, lat=place.lat, lon=place.lon, tz=place.tz)
+        db.upsert_user(
+            msg.from_user.id,
+            msg.from_user.username,
+            place=place.name,
+            lat=place.lat,
+            lon=place.lon,
+            tz=place.tz,
+        )
         await state.clear()
-        await msg.answer(f"Место установлено по геолокации: {place.lat:.4f}, {place.lon:.4f} "
-                         f"({place.tz}).\n\nНапишите свой вопрос.",
-                         reply_markup=ReplyKeyboardRemove())
+        await msg.answer(
+            f"Место установлено по геолокации: {place.lat:.4f}, {place.lon:.4f} "
+            f"({place.tz}).\n\nНапишите свой вопрос.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
 
     # ------------------------------ сервис -------------------------------- #
 
@@ -139,7 +163,8 @@ def register(dp: Dispatcher) -> None:
         else:
             left = db.remaining(msg.from_user.id, settings.daily_limit)
         await msg.answer(
-            f"Место: <b>{html.escape(place.name)}</b> ({place.lat:.3f}, {place.lon:.3f}, {place.tz})\n"
+            f"Место: <b>{html.escape(place.name)}</b> "
+            f"({place.lat:.3f}, {place.lon:.3f}, {place.tz})\n"
             f"Осталось прашн сегодня: {left}\n"
             f"Аянамша: {settings.ayanamsa}"
         )
@@ -169,8 +194,9 @@ def register(dp: Dispatcher) -> None:
             await msg.answer("Такой прашны в вашей истории нет.")
             return
         doc = BufferedInputFile(
-            (f"Вопрос: {row['question']}\n\n{row['chart_text']}\n\n"
-             f"ТОЛКОВАНИЕ:\n{row['answer']}").encode("utf-8"),
+            (
+                f"Вопрос: {row['question']}\n\n{row['chart_text']}\n\nТОЛКОВАНИЕ:\n{row['answer']}"
+            ).encode(),
             filename=f"prashna_{row['id']}.txt",
         )
         await msg.answer_document(doc, caption=f"Прашна #{row['id']}")
@@ -196,12 +222,15 @@ def register(dp: Dispatcher) -> None:
             await msg.answer("Сформулируйте вопрос подробнее — прашна требует ясной формулировки.")
             return
         if len(question) > 500:
-            await msg.answer("Вопрос слишком длинный. Уложитесь в 500 символов и задайте одну тему.")
+            await msg.answer(
+                "Вопрос слишком длинный. Уложитесь в 500 символов и задайте одну тему."
+            )
             return
 
         if msg.from_user.id not in settings.admin_ids:
-            ok, reason = db.check_and_bump(msg.from_user.id, settings.daily_limit,
-                                           settings.cooldown_seconds)
+            ok, reason = db.check_and_bump(
+                msg.from_user.id, settings.daily_limit, settings.cooldown_seconds
+            )
             if not ok:
                 await msg.answer(reason)
                 return
@@ -215,12 +244,18 @@ def register(dp: Dispatcher) -> None:
         try:
             house = detect_house(question)
             chart = await asyncio.to_thread(
-                build_chart, moment, place.lat, place.lon, place.tz, place.name,
-                house, settings.ayanamsa,
+                build_chart,
+                moment,
+                place.lat,
+                place.lon,
+                place.tz,
+                place.name,
+                house,
+                settings.ayanamsa,
             )
             chart_text = render_chart_text(chart)
             factors = judgment_factors(chart)
-        except Exception as e:  # noqa: BLE001
+        except Exception:
             log.exception("Ошибка расчёта карты")
             await msg.answer("Не удалось рассчитать карту. Проверьте настройки места (/city).")
             return
@@ -235,13 +270,15 @@ def register(dp: Dispatcher) -> None:
         await msg.bot.send_chat_action(msg.chat.id, ChatAction.TYPING)
         try:
             answer = await llm.interpret(
-                question, house, C.HOUSE_MEANINGS[house], chart_text, factors,
+                question, house, C.HOUSE_MEANINGS[house], chart_text, factors
             )
         except llm.LLMError as e:
             log.error("LLM: %s", e)
-            await msg.answer("Карта рассчитана, но сервис толкования сейчас недоступен. "
-                             "Попробуйте повторить через несколько минут — карта будет новой, "
-                             "так как прашна строится на момент вопроса.")
+            await msg.answer(
+                "Карта рассчитана, но сервис толкования сейчас недоступен. "
+                "Попробуйте повторить через несколько минут — карта будет новой, "
+                "так как прашна строится на момент вопроса."
+            )
             return
 
         pid = db.save_prashna(msg.from_user.id, question, house, place.name, chart_text, answer)
@@ -253,8 +290,7 @@ def register(dp: Dispatcher) -> None:
             left_txt = "∞ безлимит"
         else:
             left_txt = str(db.remaining(msg.from_user.id, settings.daily_limit))
-        await msg.answer(f"Полная карта: <code>/chart {pid}</code> · "
-                         f"осталось сегодня: {left_txt}")
+        await msg.answer(f"Полная карта: <code>/chart {pid}</code> · осталось сегодня: {left_txt}")
 
     @dp.message()
     async def fallback(msg: Message) -> None:
@@ -279,8 +315,7 @@ async def run() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     db.init()
-    bot = Bot(settings.telegram_token,
-              default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    bot = Bot(settings.telegram_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=router_storage)
     register(dp)
     me = await bot.get_me()

@@ -1,4 +1,5 @@
 """Геокодирование города и определение часового пояса."""
+
 from __future__ import annotations
 
 import asyncio
@@ -56,7 +57,7 @@ async def geocode(query: str) -> Place | None:
                 )
                 r.raise_for_status()
                 data = r.json()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.warning("Геокодер недоступен: %s", e)
             return None
 
@@ -76,4 +77,6 @@ def place_from_coords(lat: float, lon: float, name: str | None = None) -> Place:
 
 
 def default_place() -> Place:
-    return Place(settings.default_city, settings.default_lat, settings.default_lon, settings.default_tz)
+    return Place(
+        settings.default_city, settings.default_lat, settings.default_lon, settings.default_tz
+    )

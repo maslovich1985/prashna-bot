@@ -1,11 +1,13 @@
 """SQLite: профили пользователей (город/координаты), история прашн, счётчики лимитов."""
+
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from .config import settings
 
@@ -76,6 +78,7 @@ def init() -> None:
 
 # ----------------------------- пользователи ------------------------------- #
 
+
 def get_user(user_id: int) -> dict[str, Any] | None:
     with conn() as c:
         row = c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
@@ -86,7 +89,8 @@ def upsert_user(user_id: int, username: str | None = None, **fields: Any) -> Non
     with conn() as c:
         c.execute(
             "INSERT INTO users (user_id, username, created_at, updated_at) VALUES (?,?,?,?) "
-            "ON CONFLICT(user_id) DO UPDATE SET username=COALESCE(excluded.username, users.username), "
+            "ON CONFLICT(user_id) DO UPDATE SET "
+            "username=COALESCE(excluded.username, users.username), "
             "updated_at=excluded.updated_at",
             (user_id, username, _now(), _now()),
         )
@@ -100,24 +104,29 @@ def upsert_user(user_id: int, username: str | None = None, **fields: Any) -> Non
 
 # -------------------------------- лимиты ---------------------------------- #
 
+
 def check_and_bump(user_id: int, daily_limit: int, cooldown: int) -> tuple[bool, str]:
     """Возвращает (разрешено, причина отказа)."""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     now = datetime.now(timezone.utc)
     with conn() as c:
-        row = c.execute("SELECT count, last_at FROM usage WHERE user_id=? AND day=?",
-                        (user_id, today)).fetchone()
+        row = c.execute(
+            "SELECT count, last_at FROM usage WHERE user_id=? AND day=?", (user_id, today)
+        ).fetchone()
         count = row["count"] if row else 0
         if row and row["last_at"]:
             delta = (now - datetime.fromisoformat(row["last_at"])).total_seconds()
             if delta < cooldown:
                 return False, f"Подождите ещё {int(cooldown - delta)} с перед следующим вопросом."
         if count >= daily_limit:
-            return False, (f"Дневной лимит исчерпан ({daily_limit} прашн в сутки). "
-                           "Прашна требует искреннего, вызревшего вопроса — вернитесь завтра.")
+            return False, (
+                f"Дневной лимит исчерпан ({daily_limit} прашн в сутки). "
+                "Прашна требует искреннего, вызревшего вопроса — вернитесь завтра."
+            )
         c.execute(
             "INSERT INTO usage (user_id, day, count, last_at) VALUES (?,?,1,?) "
-            "ON CONFLICT(user_id, day) DO UPDATE SET count = usage.count + 1, last_at = excluded.last_at",
+            "ON CONFLICT(user_id, day) DO UPDATE SET "
+            "count = usage.count + 1, last_at = excluded.last_at",
             (user_id, today, now.isoformat()),
         )
     return True, ""
@@ -126,14 +135,18 @@ def check_and_bump(user_id: int, daily_limit: int, cooldown: int) -> tuple[bool,
 def remaining(user_id: int, daily_limit: int) -> int:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with conn() as c:
-        row = c.execute("SELECT count FROM usage WHERE user_id=? AND day=?", (user_id, today)).fetchone()
+        row = c.execute(
+            "SELECT count FROM usage WHERE user_id=? AND day=?", (user_id, today)
+        ).fetchone()
     return max(0, daily_limit - (row["count"] if row else 0))
 
 
 # ------------------------------- история ---------------------------------- #
 
-def save_prashna(user_id: int, question: str, house: int, place: str,
-                 chart_text: str, answer: str) -> int:
+
+def save_prashna(
+    user_id: int, question: str, house: int, place: str, chart_text: str, answer: str
+) -> int:
     with conn() as c:
         cur = c.execute(
             "INSERT INTO prashna (user_id, asked_at, place, question, house, chart_text, answer) "
@@ -147,7 +160,9 @@ def history(user_id: int, limit: int = 10) -> list[dict[str, Any]]:
     with conn() as c:
         rows = c.execute(
             "SELECT id, asked_at, question, house FROM prashna WHERE user_id=? "
-            "ORDER BY asked_at DESC LIMIT ?", (user_id, limit)).fetchall()
+            "ORDER BY asked_at DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -165,6 +180,7 @@ def clear_history(user_id: int) -> int:
 
 # ------------------------------- геокэш ----------------------------------- #
 
+
 def geocache_get(query: str) -> dict[str, Any] | None:
     with conn() as c:
         row = c.execute("SELECT * FROM geocache WHERE query=?", (query.lower().strip(),)).fetchone()
@@ -173,8 +189,10 @@ def geocache_get(query: str) -> dict[str, Any] | None:
 
 def geocache_put(query: str, place: str, lat: float, lon: float, tz: str) -> None:
     with conn() as c:
-        c.execute("INSERT OR REPLACE INTO geocache (query, place, lat, lon, tz) VALUES (?,?,?,?,?)",
-                  (query.lower().strip(), place, lat, lon, tz))
+        c.execute(
+            "INSERT OR REPLACE INTO geocache (query, place, lat, lon, tz) VALUES (?,?,?,?,?)",
+            (query.lower().strip(), place, lat, lon, tz),
+        )
 
 
 def stats() -> dict[str, int]:
@@ -183,5 +201,6 @@ def stats() -> dict[str, int]:
         total = c.execute("SELECT COUNT(*) n FROM prashna").fetchone()["n"]
         today = c.execute(
             "SELECT COALESCE(SUM(count),0) n FROM usage WHERE day=?",
-            (datetime.now(timezone.utc).strftime("%Y-%m-%d"),)).fetchone()["n"]
+            (datetime.now(timezone.utc).strftime("%Y-%m-%d"),),
+        ).fetchone()["n"]
     return {"пользователей": users, "всего прашн": total, "сегодня": today}

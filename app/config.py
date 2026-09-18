@@ -1,4 +1,5 @@
 """Конфигурация приложения. Все значения берутся из переменных окружения / .env."""
+
 from __future__ import annotations
 
 import os
@@ -49,7 +50,9 @@ class Settings:
     default_tz: str = os.getenv("DEFAULT_TZ", "Europe/Moscow")
 
     geocoder_url: str = os.getenv("GEOCODER_URL", "https://nominatim.openstreetmap.org/search")
-    geocoder_user_agent: str = os.getenv("GEOCODER_UA", "prashna-bot/1.0 (contact: admin@example.com)")
+    geocoder_user_agent: str = os.getenv(
+        "GEOCODER_UA", "prashna-bot/1.0 (contact: maslovichas1985@gmail.com)"
+    )
 
     ayanamsa: str = os.getenv("AYANAMSA", "LAHIRI")
 
@@ -65,6 +68,7 @@ def validate() -> None:
         missing.append("GROQ_API_KEY")
     if missing:
         raise SystemExit(
-            "Не заданы обязательные переменные окружения: " + ", ".join(missing)
+            "Не заданы обязательные переменные окружения: "
+            + ", ".join(missing)
             + "\nСкопируйте .env.example в .env и заполните его."
         )
