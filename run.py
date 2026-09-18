@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Точка входа: python run.py"""
+
 import asyncio
 
 from app.bot import run

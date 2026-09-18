@@ -1,4 +1,5 @@
 """Интерпретация прашна-карты через Groq (OpenAI-совместимый Chat Completions API)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -47,8 +48,9 @@ class LLMError(RuntimeError):
     pass
 
 
-def build_user_prompt(question: str, house: int, house_meaning: str,
-                      chart_text: str, factors: list[str]) -> str:
+def build_user_prompt(
+    question: str, house: int, house_meaning: str, chart_text: str, factors: list[str]
+) -> str:
     return (
         f"ВОПРОС ВОПРОШАЮЩЕГО:\n«{question}»\n\n"
         f"ДОМ ВОПРОСА: {house}-й ({house_meaning})\n\n"
@@ -59,16 +61,24 @@ def build_user_prompt(question: str, house: int, house_meaning: str,
     )
 
 
-async def interpret(question: str, house: int, house_meaning: str,
-                    chart_text: str, factors: list[str], retries: int = 3) -> str:
+async def interpret(
+    question: str,
+    house: int,
+    house_meaning: str,
+    chart_text: str,
+    factors: list[str],
+    retries: int = 3,
+) -> str:
     payload = {
         "model": settings.groq_model,
         "temperature": 0.4,
         "max_tokens": settings.groq_max_tokens,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": build_user_prompt(question, house, house_meaning,
-                                                          chart_text, factors)},
+            {
+                "role": "user",
+                "content": build_user_prompt(question, house, house_meaning, chart_text, factors),
+            },
         ],
     }
     headers = {
@@ -81,8 +91,7 @@ async def interpret(question: str, house: int, house_meaning: str,
     for attempt in range(retries):
         try:
             async with httpx.AsyncClient(
-                timeout=settings.groq_timeout,
-                proxy=settings.llm_proxy or None,
+                timeout=settings.groq_timeout, proxy=settings.llm_proxy or None
             ) as client:
                 r = await client.post(url, json=payload, headers=headers)
             if r.status_code == 429:
@@ -93,7 +102,7 @@ async def interpret(question: str, house: int, house_meaning: str,
             r.raise_for_status()
             data = r.json()
             return data["choices"][0]["message"]["content"].strip()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             last_err = e
             log.warning("Ошибка запроса к Groq (попытка %d): %s", attempt + 1, e)
             await asyncio.sleep(2 * (attempt + 1))

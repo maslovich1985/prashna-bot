@@ -3,11 +3,11 @@
 Используется сидерический зодиак (по умолчанию аянамша Лахири) и система домов
 «целый знак» (whole sign), как принято в классическом джьотише.
 """
+
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import swisseph as swe
@@ -120,6 +120,7 @@ class PrashnaChart:
 # Варги
 # --------------------------------------------------------------------------- #
 
+
 def varga_sign(lon: float, division: int) -> int:
     s = sign_of(lon)
     d = deg_in_sign(lon)
@@ -155,6 +156,7 @@ VARGAS = [1, 2, 3, 4, 7, 9, 10, 12]
 # --------------------------------------------------------------------------- #
 # Достоинства, сожжение, аспекты
 # --------------------------------------------------------------------------- #
+
 
 def dignity_of(planet: str, sign: int, deg: float) -> str:
     ex = C.EXALTATION.get(planet)
@@ -195,7 +197,7 @@ def compute_aspects(planets: dict[str, PlanetPos], asc_sign: int) -> dict[str, l
     """Граха дришти по знакам (раши дришти опущена)."""
     result: dict[str, list[str]] = {}
     for name, p in planets.items():
-        targets = [7] + C.SPECIAL_ASPECTS.get(name, [])
+        targets = [7, *C.SPECIAL_ASPECTS.get(name, [])]
         aspected_signs = sorted({(p.sign + t - 1) % 12 for t in targets})
         items = []
         for sg in aspected_signs:
@@ -213,6 +215,7 @@ def compute_aspects(planets: dict[str, PlanetPos], asc_sign: int) -> dict[str, l
 # Аруда
 # --------------------------------------------------------------------------- #
 
+
 def aruda_of_house(house_no: int, asc_sign: int, planets: dict[str, PlanetPos]) -> int:
     house_sign = (asc_sign + house_no - 1) % 12
     lord = C.SIGN_LORDS[house_sign]
@@ -228,6 +231,7 @@ def aruda_of_house(house_no: int, asc_sign: int, planets: dict[str, PlanetPos]) 
 # --------------------------------------------------------------------------- #
 # Вимшоттари даша
 # --------------------------------------------------------------------------- #
+
 
 def vimshottari(moon_lon: float, moment: datetime) -> dict[str, str]:
     nak_len = 360.0 / 27
@@ -284,6 +288,7 @@ def vimshottari(moon_lon: float, moment: datetime) -> dict[str, str]:
 # Панчанга
 # --------------------------------------------------------------------------- #
 
+
 def panchanga(sun_lon: float, moon_lon: float, local: datetime) -> dict[str, str]:
     diff = norm360(moon_lon - sun_lon)
     tithi_idx = int(diff // 12)
@@ -311,7 +316,7 @@ def panchanga(sun_lon: float, moon_lon: float, local: datetime) -> dict[str, str
         "накшатра_луны": C.NAKSHATRAS[int(norm360(moon_lon) // (360 / 27))],
         "йога": C.YOGA_NAMES[yoga_idx],
         "карана": karana,
-        "вара": f"{['Понедельник','Вторник','Среда','Четверг','Пятница','Суббота','Воскресенье'][weekday]} (владыка дня {day_lord})",
+        "вара": f"{C.WEEKDAYS[weekday]} (владыка дня {day_lord})",
         "хора": f"владыка хоры {hora_lord}",
     }
 
@@ -319,6 +324,7 @@ def panchanga(sun_lon: float, moon_lon: float, local: datetime) -> dict[str, str
 # --------------------------------------------------------------------------- #
 # Главная функция
 # --------------------------------------------------------------------------- #
+
 
 def build_chart(
     moment_utc: datetime,
@@ -333,9 +339,7 @@ def build_chart(
 
     ut = moment_utc.astimezone(timezone.utc)
     jd = swe.julday(
-        ut.year, ut.month, ut.day,
-        ut.hour + ut.minute / 60 + ut.second / 3600,
-        swe.GREG_CAL,
+        ut.year, ut.month, ut.day, ut.hour + ut.minute / 60 + ut.second / 3600, swe.GREG_CAL
     )
     ayan = swe.get_ayanamsa_ut(jd)
 
@@ -345,12 +349,17 @@ def build_chart(
         local = moment_utc
 
     chart = PrashnaChart(
-        when_utc=ut, when_local=local, tz_name=tz_name, lat=lat, lon=lon,
-        place=place, ayanamsa_value=ayan,
+        when_utc=ut,
+        when_local=local,
+        tz_name=tz_name,
+        lat=lat,
+        lon=lon,
+        place=place,
+        ayanamsa_value=ayan,
     )
 
     # Асцендент (Лагна), дома — целый знак
-    cusps, ascmc = swe.houses_ex(jd, lat, lon, b"W", swe.FLG_SIDEREAL)
+    _cusps, ascmc = swe.houses_ex(jd, lat, lon, b"W", swe.FLG_SIDEREAL)
     chart.asc_lon = norm360(ascmc[0])
     chart.asc_sign = sign_of(chart.asc_lon)
     chart.asc_deg = deg_in_sign(chart.asc_lon)
@@ -378,7 +387,12 @@ def build_chart(
         d = deg_in_sign(plon)
         nk = int(plon // nak_len)
         chart.planets[name] = PlanetPos(
-            name=name, lon=plon, speed=speed, retro=retro, sign=s, deg=d,
+            name=name,
+            lon=plon,
+            speed=speed,
+            retro=retro,
+            sign=s,
+            deg=d,
             house=houses_between(chart.asc_sign, s),
             nakshatra=nk,
             pada=int((plon % nak_len) // (nak_len / 4)) + 1,
@@ -417,4 +431,5 @@ def build_chart(
 
 def _tz(name: str):
     from zoneinfo import ZoneInfo
+
     return ZoneInfo(name)

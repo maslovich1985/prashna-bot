@@ -1,0 +1,33 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# Ruff умеет форматировать python-блоки внутри .md. Для docs/ это только шум
+# в диффе, а CI начал бы падать на рукописных сниппетах в README и ROADMAP.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "ASYNC", "RUF"]
+ignore = [
+    # RUF001-003 принимают кириллицу за «похожую» латиницу: в русскоязычном
+    # проекте это 289 ложных срабатываний из 332.
+    "RUF001", "RUF002", "RUF003",
+    # UP017 переписывает timezone.utc в datetime.UTC (только Python 3.11+).
+    # deploy/install.sh ставит системный python3 без пина: на Ubuntu 22.04 это
+    # 3.10, на Debian 11 — 3.9, а CI работает на 3.12. Правка прошла бы CI и
+    # упала на сервере. Включить, когда версия на VPS зафиксирована >= 3.11.
+    "UP017",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"app/astro/constants.py" = ["E501"]   # таблицы читаются хуже с переносами
+
+[tool.ruff.lint.isort]
+split-on-trailing-comma = false       # иначе конфликт с format ниже
+
+[tool.ruff.format]
+# Без этого «магическая» висячая запятая разносит каждый короткий список по
+# одному элементу на строку — астрологические таблицы становятся нечитаемыми.
+skip-magic-trailing-comma = true
+# Таблицы выровнены вручную по смыслу (12 знаков, 27 накшатр, 9 планет в ряд);
+# автоформат это ломает. Правила достоинств тюнятся именно здесь.
+exclude = ["app/astro/constants.py"]
