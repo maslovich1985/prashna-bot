@@ -27,7 +27,10 @@ TMPDIR="$APP_DIR/tmp" "$APP_DIR/.venv/bin/pip" install --no-cache-dir -q -r "$AP
 rm -rf "$APP_DIR/tmp"/*
 
 echo "==> Права и unit-файл"
-chown -R prashna:prashna "$APP_DIR"
+chown -R prashna:prashna "$APP_DIR/app" "$APP_DIR/run.py" "$APP_DIR/requirements.txt" \
+    "$APP_DIR/deploy" "$APP_DIR/data" 2>/dev/null || true
+# incoming принадлежит deployer — иначе следующий rsync из GitHub Actions упрётся в права
+id -u deployer >/dev/null 2>&1 && chown -R deployer:deployer "$APP_DIR/incoming"
 cp "$APP_DIR/deploy/prashna-bot.service" /etc/systemd/system/prashna-bot.service
 systemctl daemon-reload
 
@@ -44,7 +47,7 @@ else
     rm -rf "$APP_DIR/app"
     cp -r "$BACKUP/app" "$APP_DIR/app"
     cp "$BACKUP/run.py" "$APP_DIR/" 2>/dev/null || true
-    chown -R prashna:prashna "$APP_DIR"
+    chown -R prashna:prashna "$APP_DIR/app" "$APP_DIR/run.py"
     systemctl restart prashna-bot
     echo "--- последние логи ---"
     journalctl -u prashna-bot -n 30 --no-pager
