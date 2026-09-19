@@ -51,9 +51,13 @@ Astro-only sanity check (no Telegram/Groq/network): the same `build_chart` +
 
 One-way flow: **Telegram → geo → chart → factors → LLM → SQLite → Telegram.**
 
-- `app/bot.py` — every handler registered in one `register(dp)` function. The prashna path is the
-  catch-all `F.text & ~F.text.startswith("/")` handler. `build_chart` (pyswisseph) is CPU-blocking
+- `app/bot.py` — only `run()` (logging, DB init, polling). Handlers live in `app/handlers/`:
+  `basic.py`, `place.py`, `prashna.py`, shared bits in `common.py`, assembled by the `ROUTERS`
+  tuple in `__init__.py`. That tuple's order is the matching order — **`prashna` stays last**,
+  its catch-all otherwise eats commands and the FSM city input. The prashna path is the
+  `F.text & ~F.text.startswith("/")` handler. `build_chart` (pyswisseph) is CPU-blocking
   and **must be called via `asyncio.to_thread`**, never directly in an async handler.
+- `app/texts.py` — all user-facing strings. New UI text goes here, not inline in a handler.
 - `app/astro/constants.py` — every astrological table. Tuning house/keyword detection or dignity
   rules means editing this file, not the logic in `chart.py`/`prashna.py`.
 - `app/astro/chart.py` — pure computation, Swiss Ephemeris with `FLG_MOSEPH` (no ephemeris files).
