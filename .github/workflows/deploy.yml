@@ -3,20 +3,27 @@ name: Deploy to VPS
 on:
   push:
     branches: [main]        # мерж PR в main = push в main = деплой
+  pull_request:
+    branches: [main]        # на PR гоняем только job `check`, без деплоя
   workflow_dispatch:        # плюс кнопка «запустить вручную» в интерфейсе GitHub
 
 concurrency:
-  group: deploy-production
-  cancel-in-progress: false
+  # Прогоны на PR не должны занимать очередь деплоя: у каждого PR своя группа,
+  # и новый пуш в ветку отменяет предыдущий прогон. Деплой по-прежнему строго
+  # последовательный и неотменяемый.
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.ref) || 'deploy-production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
+    # Образ пинуем: 19.10.2026 ubuntu-latest уезжает на Ubuntu 26, и смена
+    # системного окружения не должна прилетать в деплой-пайплайн сама собой.
     name: Проверка кода
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -57,9 +64,10 @@ jobs:
   deploy:
     name: Деплой на VPS
     needs: check
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Настройка SSH
         run: |
