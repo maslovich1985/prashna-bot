@@ -26,23 +26,23 @@ python run.py                 # entry point; validate() exits if required env va
   pin exact versions. CI runs Python 3.12.
 - `.env` and `data/` are gitignored; they exist only on the server.
 
-## Verification — there is NO test suite and NO linter
+## Verification
 
-The only automated gate is `.github/workflows/deploy.yml` → job `check`. **Run it locally before
-pushing or a merge into `main` will fail and block deploy:**
+The automated gate is `.github/workflows/deploy.yml` → job `check`: it runs on every PR into
+`main` and again on push to `main` before deploy. **Run the same locally before pushing:**
 
 ```bash
+pip install -r requirements-dev.txt
+ruff check .
+ruff format --check .
 python -m compileall -q app run.py
-python3 -c "
-from datetime import datetime, timezone
-from app.astro.chart import build_chart
-from app.astro.prashna import render_chart_text, judgment_factors, detect_house
-house = detect_house('получу ли я оффер на новую работу')   # must be 10
-c = build_chart(datetime.now(timezone.utc), 56.5, 84.97, 'Asia/Tomsk', 'Томск', house)
-assert len(c.planets) == 9 and len(c.vargas) == 8
-assert 'Лагна:' in render_chart_text(c) and len(judgment_factors(c)) > 8
-"
+pytest -q
 ```
+
+Tests are in `tests/`. `tests/conftest.py` repoints `app.db` at a fresh SQLite file in `tmp_path`
+per test — setting `DB_PATH` in env does nothing, `app/config.py` reads env at import time.
+`tests/test_chart.py` holds reference positions for one fixed moment; if they change, the
+calculation changed.
 
 Astro-only sanity check (no Telegram/Groq/network): the same `build_chart` +
 `render_chart_text`/`judgment_factors` calls work offline.

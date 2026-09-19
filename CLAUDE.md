@@ -30,10 +30,20 @@ print(render_chart_text(c)); print(); print('\n'.join(judgment_factors(c)))
 "
 ```
 
-There is no test suite and no linter. The only automated gate is `.github/workflows/deploy.yml` →
-job `check`: `python -m compileall -q app run.py` plus an inline smoke script asserting
-`detect_house("получу ли я оффер на новую работу") == 10`, 9 planets, 8 vargas, and >8 judgment
-factors. Run that script locally before pushing — a failure there blocks deploy.
+Checks live in `.github/workflows/deploy.yml` → job `check`, which runs on every PR into `main`
+and again on push to `main` before the deploy job: `ruff check .`, `ruff format --check .`,
+`python -m compileall -q app run.py`, `pytest -q`. A failure blocks deploy. Run the same locally:
+
+```bash
+pip install -r requirements-dev.txt
+ruff check . && ruff format --check . && pytest -q
+```
+
+Tests live in `tests/`, not colocated (the package is `app/`, tests are a separate tree).
+`tests/conftest.py` points `app.db` at a fresh SQLite file under `tmp_path` for every test —
+`DB_PATH` in env won't work, since `app/config.py` reads env at import time.
+`tests/test_chart.py` pins reference positions for a fixed moment: a diff there means the
+calculation changed, not that the data drifted.
 
 ## Architecture
 
