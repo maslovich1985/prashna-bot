@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
+import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -10,6 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from .config import settings
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -71,9 +75,55 @@ def conn() -> Iterator[sqlite3.Connection]:
         c.close()
 
 
+# Каждый элемент — один шаг, применяемый ровно один раз; индекс i соответствует
+# user_version = i + 1. Шаги только дописывают схему: откат кода не должен оставлять
+# базу нечитаемой для предыдущей версии. Менять уже выпущенный шаг нельзя — на серверах,
+# где он применён, правка не выполнится; нужен новый шаг в конце списка.
+MIGRATIONS: list[str] = []
+
+
+def _backup_before_migrate() -> None:
+    """Снимает бэкап перед изменением схемы. Нет скрипта — просто предупреждение."""
+    script = Path(__file__).resolve().parent.parent / "deploy" / "backup.sh"
+    if not script.exists():
+        log.warning("Миграции без бэкапа: нет %s", script)
+        return
+    try:
+        subprocess.run(["bash", str(script)], check=True, capture_output=True, timeout=300)
+    except Exception as e:
+        # Миграция необратима, а откат кода вернёт старую версию к уехавшей схеме.
+        # Без свежей копии дешевле не стартовать вовсе.
+        raise RuntimeError(f"Бэкап перед миграцией не удался: {e}") from e
+
+
+def migrate() -> None:
+    """Догоняет схему до последней версии. Идемпотентна: применяет только новые шаги."""
+    with conn() as c:
+        version = int(c.execute("PRAGMA user_version").fetchone()[0])
+        pending = MIGRATIONS[version:]
+        if not pending:
+            return
+
+    _backup_before_migrate()
+
+    with conn() as c:
+        for i, sql in enumerate(pending, start=version):
+            log.info("Миграция %d → %d", i, i + 1)
+            c.executescript(sql)
+            c.execute(f"PRAGMA user_version = {i + 1}")
+
+
 def init() -> None:
     with conn() as c:
+        # SCHEMA описывает актуальную схему целиком, поэтому на пустой базе миграции
+        # уже «содержатся» в ней — применять их поверх значило бы дублировать колонки.
+        fresh = (
+            c.execute("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'").fetchone()[0] == 0
+        )
         c.executescript(SCHEMA)
+        if fresh:
+            c.execute(f"PRAGMA user_version = {len(MIGRATIONS)}")
+    migrate()
 
 
 # ----------------------------- пользователи ------------------------------- #

@@ -115,7 +115,7 @@
 «Учебное восстановление». Из боевого архива поднялись 20 прашн и 2 пользователя,
 `integrity_check: ok`.
 
-### A-11 · Механизм миграций — S
+### ✅ A-11 · Механизм миграций — S
 
 `MIGRATIONS` + `migrate()` на `PRAGMA user_version` (§4.5). `init()`: `SCHEMA` → `migrate()`.
 Вызов из `run()` до polling. Перед `migrate()` дёргать `backup.sh`.

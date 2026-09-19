@@ -59,9 +59,10 @@ One-way flow: **Telegram → geo → chart → factors → LLM → SQLite → Te
 - `app/astro/chart.py` — pure computation, Swiss Ephemeris with `FLG_MOSEPH` (no ephemeris files).
 - `app/astro/prashna.py` — `detect_house`, `judgment_factors`, the three renderers.
 - `app/llm.py` — Groq over raw `httpx` (OpenAI-compatible endpoint, no SDK).
-- `app/db.py` — plain `sqlite3` via `@contextmanager conn()` (commits on exit, WAL). Schema is
-  idempotent DDL executed by `init()`; **no migrations** — schema changes must stay backward
-  compatible or add a new table.
+- `app/db.py` — plain `sqlite3` via `@contextmanager conn()` (commits on exit, WAL). `SCHEMA` is
+  idempotent DDL for the current shape; existing databases catch up through `MIGRATIONS` +
+  `PRAGMA user_version`, run by `init()`. **Append steps, never edit a released one**, keep them
+  backward compatible, and expect `deploy/backup.sh` to run before any pending migration.
 - `app/geo.py` — Nominatim, throttled to ≤1 req/sec by a module-level lock, cached in SQLite.
 - `app/config.py` — frozen `Settings` dataclass, defaults evaluated **at import time**; scripts or
   tests must set env vars before importing `app.config`.
