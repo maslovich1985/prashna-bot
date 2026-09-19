@@ -1,0 +1,24 @@
+[Unit]
+Description=Резервная копия базы прашна-бота
+Documentation=file:/opt/prashna-bot/deploy/backup.sh
+# Бэкап не должен запускаться раньше, чем смонтированы файловые системы
+RequiresMountsFor=/opt/prashna-bot
+
+[Service]
+Type=oneshot
+User=prashna
+Group=prashna
+ExecStart=/opt/prashna-bot/deploy/backup.sh
+# Скрипт читает data/ и пишет в backups/ — больше ему ничего не нужно
+ReadWritePaths=/opt/prashna-bot/backups
+ReadOnlyPaths=/opt/prashna-bot/data
+SyslogIdentifier=prashna-backup
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true

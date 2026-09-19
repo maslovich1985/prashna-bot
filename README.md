@@ -146,10 +146,16 @@ bash /opt/prashna-bot/deploy/backup.sh  # бэкап базы
 bash /opt/prashna-bot/deploy/update.sh /root/prashna-bot   # обновить код
 ```
 
-Автоматический ежедневный бэкап (`crontab -e`):
+Автоматический ежедневный бэкап делает systemd-таймер `prashna-backup.timer` — он ставится
+и включается в `install.sh`, cron для этого не нужен. Снимок снимается через
+`sqlite3 .backup` (согласованная копия при включённом WAL), проверяется `PRAGMA integrity_check`
+и сжимается `gzip -9`; архивы старше 14 дней удаляются.
 
-```
-30 4 * * * bash /opt/prashna-bot/deploy/backup.sh >/dev/null 2>&1
+```bash
+systemctl list-timers prashna-backup    # когда следующий запуск и когда был прошлый
+systemctl start prashna-backup.service  # снять бэкап немедленно
+journalctl -u prashna-backup -n 50      # что было в последних запусках
+ls -lh /opt/prashna-bot/backups         # сами архивы
 ```
 
 Журналы systemd не разрастаются бесконечно, но ограничение не помешает:
@@ -200,10 +206,13 @@ prashna-bot/
 │       ├── chart.py          расчёт карты через Swiss Ephemeris
 │       └── prashna.py        дом вопроса, факторы суждения, рендеринг карты
 └── deploy/
-    ├── install.sh            установка на чистый VPS
-    ├── update.sh             обновление кода
-    ├── backup.sh             бэкап базы
-    └── prashna-bot.service   systemd unit
+    ├── install.sh                 установка на чистый VPS
+    ├── update.sh                  обновление кода
+    ├── apply.sh                   то же, но из GitHub Actions, с откатом
+    ├── backup.sh                  бэкап базы
+    ├── prashna-bot.service        systemd unit бота
+    ├── prashna-backup.service     разовый запуск бэкапа
+    └── prashna-backup.timer       ежедневно ~03:30
 ```
 
 ---

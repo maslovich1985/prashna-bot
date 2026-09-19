@@ -32,7 +32,13 @@ chown -R prashna:prashna "$APP_DIR/app" "$APP_DIR/run.py" "$APP_DIR/requirements
 # incoming принадлежит deployer — иначе следующий rsync из GitHub Actions упрётся в права
 id -u deployer >/dev/null 2>&1 && chown -R deployer:deployer "$APP_DIR/incoming"
 cp "$APP_DIR/deploy/prashna-bot.service" /etc/systemd/system/prashna-bot.service
+cp "$APP_DIR/deploy/prashna-backup.service" /etc/systemd/system/prashna-backup.service
+cp "$APP_DIR/deploy/prashna-backup.timer" /etc/systemd/system/prashna-backup.timer
+mkdir -p "$APP_DIR/backups"
+chown prashna:prashna "$APP_DIR/backups" 2>/dev/null || true
 systemctl daemon-reload
+# Таймер мог появиться позже первой установки — включаем идемпотентно
+systemctl enable --now prashna-backup.timer >/dev/null 2>&1 || true
 
 echo "==> Перезапуск"
 systemctl restart prashna-bot

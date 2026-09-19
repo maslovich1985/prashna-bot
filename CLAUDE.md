@@ -91,5 +91,11 @@ swaps it in, reinstalls deps, restarts the systemd unit, and **auto-rolls back**
 the manual equivalent of `apply.sh`. `.env` and `data/` live only on the server and are excluded
 from rsync.
 
+The DB is backed up by `prashna-backup.timer` (daily ~03:30, `Persistent=true`), which runs
+`deploy/backup.sh`: `sqlite3 .backup` for a consistent snapshot under WAL, `PRAGMA integrity_check`
+on the snapshot, `gzip -9`, then prune archives older than 14 days. All three deploy scripts
+install the unit files and `systemctl enable --now` the timer, so a new unit reaches the VPS with
+the next deploy. The copy still lives only on the VPS — off-site upload is A-09.
+
 `.gitattributes` forces LF (`* text=auto eol=lf`, `*.sh text eol=lf`) — the shell scripts break on
 the VPS with CRLF, so never commit CRLF line endings.

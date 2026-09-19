@@ -41,8 +41,14 @@ chmod 600 "$APP_DIR/.env"
 
 echo "==> 6/7 systemd"
 cp "$APP_DIR/deploy/prashna-bot.service" /etc/systemd/system/prashna-bot.service
+cp "$APP_DIR/deploy/prashna-backup.service" /etc/systemd/system/prashna-backup.service
+cp "$APP_DIR/deploy/prashna-backup.timer" /etc/systemd/system/prashna-backup.timer
+mkdir -p "$APP_DIR/backups"
+chown "$APP_USER:$APP_USER" "$APP_DIR/backups"
+chmod +x "$APP_DIR/deploy"/*.sh
 systemctl daemon-reload
 systemctl enable prashna-bot
+systemctl enable --now prashna-backup.timer
 
 echo "==> 7/7 Firewall (только SSH; боту нужен лишь исходящий трафик)"
 ufw allow OpenSSH >/dev/null 2>&1 || true
