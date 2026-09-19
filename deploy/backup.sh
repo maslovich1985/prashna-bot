@@ -41,7 +41,8 @@ echo "Бэкап готов: $ARCHIVE ($SIZE)"
 
 # ---------------------------- выгрузка за пределы VPS ---------------------- #
 # Копия на том же диске не защищает от потери диска. Отправляем архив в закрытый
-# Telegram-канал тем же ботом: нулевые зависимости и отдельный от VPS носитель.
+# Telegram-чат тем же ботом: нулевые зависимости и отдельный от VPS носитель.
+# BACKUP_CHAT_ID — закрытый канал или личка владельца, разницы для скрипта нет.
 # Переменные берём из .env, если скрипт запущен не через systemd-юнит.
 if [ -z "${TELEGRAM_TOKEN:-}" ] && [ -f "$APP_DIR/.env" ]; then
     # shellcheck disable=SC1091
@@ -74,10 +75,10 @@ HTTP_CODE="$(curl -sS --max-time 300 --retry 3 --retry-delay 10 \
 
 if [ "$HTTP_CODE" != "200" ]; then
     # Тело ответа Telegram содержит описание ошибки, но не токен — печатать безопасно
-    echo "Выгрузка в канал не удалась (HTTP $HTTP_CODE): $(cat /tmp/prashna-backup-upload.json 2>/dev/null)" >&2
+    echo "Выгрузка в Telegram не удалась (HTTP $HTTP_CODE): $(cat /tmp/prashna-backup-upload.json 2>/dev/null)" >&2
     rm -f /tmp/prashna-backup-upload.json
     exit 1
 fi
 
 rm -f /tmp/prashna-backup-upload.json
-echo "Архив выгружен в канал $BACKUP_CHAT_ID"
+echo "Архив выгружен в чат $BACKUP_CHAT_ID"
