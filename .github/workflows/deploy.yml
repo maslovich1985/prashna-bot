@@ -41,9 +41,30 @@ jobs:
       - name: Тесты
         run: pytest -q
 
+  secrets:
+    name: Поиск секретов
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0        # gitleaks смотрит всю историю, а не один коммит
+
+      # Не gitleaks/gitleaks-action@v2: он требует GITLEAKS_LICENSE вне public-репозиториев,
+      # а этот приватный. Бинарь из релиза делает то же и без лицензии.
+      - name: Установка gitleaks
+        run: |
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+        env:
+          GITLEAKS_VERSION: 8.30.1
+
+      - name: Сканирование истории
+        run: gitleaks git --redact --no-banner --verbose .
+
   deploy:
     name: Деплой на VPS
-    needs: check
+    needs: [check, secrets]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     steps:

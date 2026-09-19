@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 data/
 backups/
 incoming/
@@ -6,3 +8,6 @@ tmp/
 __pycache__/
 *.pyc
 .venv/
+# DB_PATH может указывать куда угодно, а WAL/SHM живут рядом с файлом БД
+*.sqlite3*
+*.db
