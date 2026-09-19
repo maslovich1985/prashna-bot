@@ -3,11 +3,16 @@ name: Deploy to VPS
 on:
   push:
     branches: [main]        # мерж PR в main = push в main = деплой
+  pull_request:
+    branches: [main]        # на PR гоняем только job `check`, без деплоя
   workflow_dispatch:        # плюс кнопка «запустить вручную» в интерфейсе GitHub
 
 concurrency:
-  group: deploy-production
-  cancel-in-progress: false
+  # Прогоны на PR не должны занимать очередь деплоя: у каждого PR своя группа,
+  # и новый пуш в ветку отменяет предыдущий прогон. Деплой по-прежнему строго
+  # последовательный и неотменяемый.
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.ref) || 'deploy-production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -57,6 +62,7 @@ jobs:
   deploy:
     name: Деплой на VPS
     needs: check
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
