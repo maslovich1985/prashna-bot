@@ -9,9 +9,10 @@ Type=oneshot
 User=prashna
 Group=prashna
 ExecStart=/opt/prashna-bot/deploy/backup.sh
-# Скрипт читает data/ и пишет в backups/ — больше ему ничего не нужно
-ReadWritePaths=/opt/prashna-bot/backups
-ReadOnlyPaths=/opt/prashna-bot/data
+# data/ именно на запись, хотя бэкап только читает: база в режиме WAL, и sqlite3
+# при открытии обновляет рядом -wal и -shm. С ReadOnlyPaths здесь запуск падал
+# с «unable to open database file».
+ReadWritePaths=/opt/prashna-bot/backups /opt/prashna-bot/data
 SyslogIdentifier=prashna-backup
 
 NoNewPrivileges=true
