@@ -58,7 +58,7 @@
 **DoD:** job `check` = `compileall` + `ruff` + `pytest`; деплой проходит.
 **Зависит:** A-03
 
-### A-06 · Сканирование секретов — S
+### ✅ A-06 · Сканирование секретов — S
 
 - Включить GitHub Secret Scanning + Push Protection.
 - `gitleaks/gitleaks-action@v2` в CI с `fetch-depth: 0`.
