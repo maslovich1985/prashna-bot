@@ -69,8 +69,14 @@ Data flows one way: **Telegram → geo → chart → factors → LLM → SQLite 
 - `app/llm.py` — Groq via the OpenAI-compatible `/chat/completions` endpoint over raw `httpx`
   (no SDK). Retries 3×, honors `retry-after` on 429, optional `LLM_PROXY`.
 - `app/db.py` — plain `sqlite3` with a `@contextmanager conn()` that commits on exit and sets
-  WAL. Schema is idempotent DDL in the `SCHEMA` string executed by `init()`; there are no
-  migrations, so schema changes must stay backward compatible or add a table.
+  WAL. `SCHEMA` is idempotent DDL describing the *current* shape; `MIGRATIONS` is the catch-up
+  path for databases that already exist, tracked in `PRAGMA user_version` (entry `i` bumps it to
+  `i + 1`). `init()` runs `SCHEMA`, stamps a brand-new file with `len(MIGRATIONS)` — on an empty
+  DB the steps are already contained in `SCHEMA`, so replaying them would duplicate columns —
+  then calls `migrate()` for the rest. A pending migration triggers `deploy/backup.sh` first and
+  aborts startup if that fails: the change is one-way, and a code rollback would meet a schema
+  that moved on. Add steps, never edit a released one (servers that applied it won't re-run it),
+  and keep them backward compatible so the previous version can still read the DB.
 - `app/geo.py` — Nominatim geocoding, results cached in the `geocache` table, throttled to ≤1
   req/sec by a module-level `asyncio.Lock` + `_last_call`. `timezonefinder` derives the tz offline.
 
