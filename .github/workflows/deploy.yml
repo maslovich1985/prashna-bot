@@ -49,8 +49,8 @@ jobs:
         with:
           fetch-depth: 0        # gitleaks смотрит всю историю, а не один коммит
 
-      # Не gitleaks/gitleaks-action@v2: он требует GITLEAKS_LICENSE вне public-репозиториев,
-      # а этот приватный. Бинарь из релиза делает то же и без лицензии.
+      # Бинарь из релиза, а не gitleaks/gitleaks-action@v2: версия пинуется явно и
+      # не зависит от условий лицензии экшена, если репозиторий снова станет приватным.
       - name: Установка gitleaks
         run: |
           curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
