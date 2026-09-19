@@ -16,8 +16,10 @@ concurrency:
 
 jobs:
   check:
+    # Образ пинуем: 19.10.2026 ubuntu-latest уезжает на Ubuntu 26, и смена
+    # системного окружения не должна прилетать в деплой-пайплайн сама собой.
     name: Проверка кода
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -63,7 +65,7 @@ jobs:
     name: Деплой на VPS
     needs: check
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
