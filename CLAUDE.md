@@ -95,7 +95,11 @@ The DB is backed up by `prashna-backup.timer` (daily ~03:30, `Persistent=true`),
 `deploy/backup.sh`: `sqlite3 .backup` for a consistent snapshot under WAL, `PRAGMA integrity_check`
 on the snapshot, `gzip -9`, then prune archives older than 14 days. All three deploy scripts
 install the unit files and `systemctl enable --now` the timer, so a new unit reaches the VPS with
-the next deploy. The copy still lives only on the VPS — off-site upload is A-09.
+the next deploy. The archive is then pushed off-site with `sendDocument` to a private Telegram
+channel (`BACKUP_CHAT_ID` in `.env`, same bot token, no extra dependency). Without that variable
+the script still succeeds and just leaves the archive on the VPS; a failed upload exits non-zero
+so the unit lands in `failed`. Bot API caps documents at 50 MB — past that the script fails loudly
+rather than silently skipping, and the fallback is `rclone` to S3 (ROADMAP §4.4).
 
 `.gitattributes` forces LF (`* text=auto eol=lf`, `*.sh text eol=lf`) — the shell scripts break on
 the VPS with CRLF, so never commit CRLF line endings.
