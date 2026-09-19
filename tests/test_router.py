@@ -1,55 +1,61 @@
-"""Хэндлеры видны снаружи и зарегистрированы в нужном порядке."""
+"""Хэндлеры видны снаружи и подключаются в нужном порядке."""
 
 from __future__ import annotations
 
-import pytest
 from aiogram import Dispatcher
 
 from app import bot
+from app.handlers import ROUTERS, register
 
-# aiogram проверяет хэндлеры по порядку регистрации: catch-all для прашны обязан
-# стоять после всех команд, а fallback — последним. Порядок здесь не косметика,
-# перестановка молча ломает маршрутизацию.
+# aiogram проверяет хэндлеры по порядку регистрации. Порядок здесь не косметика:
+# catch-all прашны перехватит и команды, и ввод города в FSM, если окажется выше.
 EXPECTED_ORDER = [
+    # basic
     "start",
     "help_cmd",
     "cancel",
-    "city",
-    "city_input",
-    "location",
     "me",
     "history",
     "chart_cmd",
     "forget",
     "stats",
+    # place
+    "city",
+    "city_input",
+    "location",
+    # prashna — последним
     "prashna",
     "fallback",
 ]
 
 
 def _handler_names() -> list[str]:
-    return [h.callback.__name__ for h in bot.router.message.handlers]
+    return [h.callback.__name__ for r in ROUTERS for h in r.message.handlers]
 
 
 def test_handlers_are_importable() -> None:
-    # Ради этого и делался A-12: пока хэндлеры были замыканиями внутри register(),
-    # тесты не могли до них дотянуться.
-    assert callable(bot.start)
-    assert callable(bot.prashna)
+    from app.handlers import basic, place
+    from app.handlers import prashna as prashna_handlers
+
+    assert callable(basic.start)
+    assert callable(place.city)
+    assert callable(prashna_handlers.prashna)
 
 
 def test_registration_order() -> None:
     assert _handler_names() == EXPECTED_ORDER
 
 
-def test_register_attaches_router() -> None:
-    dp = Dispatcher()
-    bot.register(dp)
-    assert bot.router in dp.sub_routers
-    assert len(dp.sub_routers) == 1
+def test_prashna_router_is_last() -> None:
+    assert ROUTERS[-1].name == "prashna"
 
-    # router — синглтон модуля, поэтому register() рассчитан ровно на один
-    # Dispatcher за процесс. aiogram ловит вторую попытку сам; тест фиксирует это,
-    # чтобы будущие тесты хэндлеров строили свой Dispatcher, а не звали register().
-    with pytest.raises(RuntimeError, match="already attached"):
-        bot.register(Dispatcher())
+
+def test_register_attaches_all_routers() -> None:
+    dp = Dispatcher()
+    register(dp)
+    assert [r.name for r in dp.sub_routers] == ["basic", "place", "prashna"]
+
+
+def test_bot_module_reexports_register() -> None:
+    # run() собирает диспетчер через этот же register
+    assert bot.register is register

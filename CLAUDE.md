@@ -49,12 +49,19 @@ calculation changed, not that the data drifted.
 
 Data flows one way: **Telegram → geo → chart → factors → LLM → SQLite → Telegram.**
 
-- `app/bot.py` — all aiogram handlers registered in one `register(dp)` function; `run()` wires
-  logging, DB init, and polling. The catch-all `F.text & ~F.text.startswith("/")` handler is the
-  prashna path: rate-limit check → `detect_house` → `build_chart` (in `asyncio.to_thread`, since
-  pyswisseph is blocking) → send short chart → `llm.interpret` → persist → send answer in
+- `app/bot.py` — only `run()`: logging, DB init, dispatcher, polling.
+- `app/handlers/` — one `Router` per module, assembled in `__init__.py`'s `ROUTERS` tuple, which
+  is also the matching order. `basic.py` (commands), `place.py` (`/city`, FSM city input,
+  location), `prashna.py` (the main path). **`prashna` must stay last**: its
+  `F.text & ~F.text.startswith("/")` catch-all and bare `@router.message()` swallow anything the
+  routers above didn't claim. `common.py` holds what two of them share — the FSM `Form`, the
+  location keyboard, `place_for`.
+- The prashna path: rate-limit check → `detect_house` → `build_chart` (in `asyncio.to_thread`,
+  since pyswisseph is blocking) → send short chart → `llm.interpret` → persist → send answer in
   3800-char chunks. Chart is sent to the user *before* the LLM call, so an LLM outage still
   leaves the user with a chart.
+- `app/texts.py` — every user-facing string; handlers hold no literals. Constants for fixed text,
+  functions for anything interpolated.
 - `app/astro/chart.py` — pure computation via Swiss Ephemeris. Sidereal zodiac, whole-sign houses
   (`swe.houses_ex(..., b"W", ...)`), `FLG_MOSEPH` so **no ephemeris data files are needed**.
   Produces one `PrashnaChart` holding planets, vargas D1/D2/D3/D4/D7/D9/D10/D12, aspects, arudhas,
