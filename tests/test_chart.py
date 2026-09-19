@@ -79,3 +79,12 @@ def test_local_time_converted(chart: PrashnaChart) -> None:
     pytest.importorskip("zoneinfo")  # без tzdata build_chart молча оставляет UTC
     assert chart.when_local.hour == 12  # UTC+3, перехода на летнее время в Москве нет
     assert chart.when_utc == MOMENT
+
+
+def test_current_moment_other_place() -> None:
+    """Сценарий из README: текущее время, Томск. Был инлайн-смоуком в CI (A-05)."""
+    c = build_chart(datetime.now(timezone.utc), 56.5, 84.97, "Asia/Tomsk", "Томск", 10)
+    assert len(c.planets) == 9
+    assert len(c.vargas) == 8
+    assert 0 <= c.asc_sign < 12
+    assert c.question_house == 10
