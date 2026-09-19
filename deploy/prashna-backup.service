@@ -3,6 +3,10 @@ Description=Резервная копия базы прашна-бота
 Documentation=file:/opt/prashna-bot/deploy/backup.sh
 # Бэкап не должен запускаться раньше, чем смонтированы файловые системы
 RequiresMountsFor=/opt/prashna-bot
+# Архив уходит в Telegram: при Persistent=true запуск может случиться сразу после
+# загрузки, когда сети ещё нет
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
