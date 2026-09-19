@@ -151,6 +151,13 @@ bash /opt/prashna-bot/deploy/update.sh /root/prashna-bot   # обновить к
 `sqlite3 .backup` (согласованная копия при включённом WAL), проверяется `PRAGMA integrity_check`
 и сжимается `gzip -9`; архивы старше 14 дней удаляются.
 
+```bash
+systemctl list-timers prashna-backup    # когда следующий запуск и когда был прошлый
+systemctl start prashna-backup.service  # снять бэкап немедленно
+journalctl -u prashna-backup -n 50      # что было в последних запусках
+ls -lh /opt/prashna-bot/backups         # сами архивы
+```
+
 ### Копия за пределами VPS
 
 Архив на том же диске не спасёт от потери диска, поэтому `backup.sh` отправляет его в Telegram
@@ -187,11 +194,28 @@ BACKUP_CHAT_ID=782739008
 этом сохраняется. Лимит Bot API — 50 МБ на документ; при превышении скрипт падает с явным
 сообщением, а не молча перестаёт выгружать.
 
+### Учебное восстановление
+
+Непроверенный бэкап — не бэкап: о том, что архив не разворачивается, узнают ровно тогда, когда
+он нужен. Раз в квартал стоит прогонять:
+
 ```bash
-systemctl list-timers prashna-backup    # когда следующий запуск и когда был прошлый
-systemctl start prashna-backup.service  # снять бэкап немедленно
-journalctl -u prashna-backup -n 50      # что было в последних запусках
-ls -lh /opt/prashna-bot/backups         # сами архивы
+bash /opt/prashna-bot/deploy/restore-test.sh          # последний архив
+bash /opt/prashna-bot/deploy/restore-test.sh /путь/к/архиву.gz
+```
+
+Скрипт распаковывает копию в `/opt/prashna-bot/restore-test/`, проверяет `integrity_check`,
+наличие всех четырёх таблиц и печатает счётчики — сколько пользователей, прашн, когда был
+последний вопрос. Рабочая база не затрагивается. Любой сбой — ненулевой код возврата.
+
+Чтобы убедиться, что на копии поднимается сам бот, нужно остановить основной: два long polling
+с одним токеном дают от Telegram `409 Conflict`.
+
+```bash
+systemctl stop prashna-bot
+cd /opt/prashna-bot && DB_PATH=/opt/prashna-bot/restore-test/prashna.sqlite3 .venv/bin/python run.py
+# отправить боту любой вопрос, увидеть карту и ответ, затем Ctrl+C
+systemctl start prashna-bot
 ```
 
 Журналы systemd не разрастаются бесконечно, но ограничение не помешает:
@@ -245,7 +269,8 @@ prashna-bot/
     ├── install.sh                 установка на чистый VPS
     ├── update.sh                  обновление кода
     ├── apply.sh                   то же, но из GitHub Actions, с откатом
-    ├── backup.sh                  бэкап базы
+    ├── backup.sh                  бэкап базы + выгрузка в Telegram
+    ├── restore-test.sh            учебное восстановление из архива
     ├── prashna-bot.service        systemd unit бота
     ├── prashna-backup.service     разовый запуск бэкапа
     └── prashna-backup.timer       ежедневно ~03:30
