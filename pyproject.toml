@@ -31,3 +31,8 @@ skip-magic-trailing-comma = true
 # Таблицы выровнены вручную по смыслу (12 знаков, 27 накшатр, 9 планет в ряд);
 # автоформат это ломает. Правила достоинств тюнятся именно здесь.
 exclude = ["app/astro/constants.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+asyncio_mode = "auto"
