@@ -33,6 +33,9 @@ skip-magic-trailing-comma = true
 exclude = ["app/astro/constants.py"]
 
 [tool.pytest.ini_options]
+# Без этого `pytest` (в отличие от `python -m pytest`) не кладёт корень репозитория
+# в sys.path, и `from app import ...` падает в CI.
+pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q"
 asyncio_mode = "auto"
