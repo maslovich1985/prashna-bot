@@ -9,7 +9,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from . import db
+from . import db, observability
 from .config import settings
 from .handlers import register
 
@@ -23,9 +23,11 @@ async def run() -> None:
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    observability.init()
     db.init()
     bot = Bot(settings.telegram_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
+    dp.update.outer_middleware(observability.SentryMiddleware())
     register(dp)
     bot_info = await bot.get_me()
     log.info("Бот @%s запущен", bot_info.username)
