@@ -34,6 +34,10 @@ class Settings:
     db_path: Path = Path(os.getenv("DB_PATH", str(BASE_DIR / "data" / "prashna.sqlite3")))
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
 
+    # пустой DSN = Sentry выключен, бот работает как раньше
+    sentry_dsn: str = os.getenv("SENTRY_DSN", "")
+    sentry_env: str = os.getenv("SENTRY_ENV", "production")
+
     # антиспам
     daily_limit: int = _int("DAILY_LIMIT", 5)
     cooldown_seconds: int = _int("COOLDOWN_SECONDS", 30)
