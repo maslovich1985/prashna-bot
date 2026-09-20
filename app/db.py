@@ -54,6 +54,28 @@ CREATE TABLE IF NOT EXISTS geocache (
     lon         REAL,
     tz          TEXT
 );
+
+CREATE TABLE IF NOT EXISTS entitlements (
+    user_id        INTEGER PRIMARY KEY,
+    plan           TEXT,
+    expires_at     TEXT,
+    questions_left INTEGER NOT NULL DEFAULT 0,
+    trial_used     INTEGER NOT NULL DEFAULT 0,
+    updated_at     TEXT NOT NULL
+);
+
+-- charge_id — telegram_payment_charge_id. PRIMARY KEY здесь не украшение,
+-- а защита от двойной выдачи: повторный successful_payment с тем же id
+-- не создаст вторую запись и не начислит доступ дважды.
+CREATE TABLE IF NOT EXISTS payments (
+    charge_id   TEXT PRIMARY KEY,
+    user_id     INTEGER NOT NULL,
+    plan        TEXT NOT NULL,
+    stars       INTEGER NOT NULL,
+    paid_at     TEXT NOT NULL,
+    refunded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, paid_at DESC);
 """
 
 
@@ -79,7 +101,33 @@ def conn() -> Iterator[sqlite3.Connection]:
 # user_version = i + 1. Шаги только дописывают схему: откат кода не должен оставлять
 # базу нечитаемой для предыдущей версии. Менять уже выпущенный шаг нельзя — на серверах,
 # где он применён, правка не выполнится; нужен новый шаг в конце списка.
-MIGRATIONS: list[str] = []
+MIGRATIONS: list[str] = [
+    # 0 → 1: таблицы квот и платежей (B-01). Только CREATE TABLE IF NOT EXISTS —
+    # существующие данные не трогаются, прошлая версия кода такую базу ещё читает.
+    """
+CREATE TABLE IF NOT EXISTS entitlements (
+    user_id        INTEGER PRIMARY KEY,
+    plan           TEXT,
+    expires_at     TEXT,
+    questions_left INTEGER NOT NULL DEFAULT 0,
+    trial_used     INTEGER NOT NULL DEFAULT 0,
+    updated_at     TEXT NOT NULL
+);
+
+-- charge_id — telegram_payment_charge_id. PRIMARY KEY здесь не украшение,
+-- а защита от двойной выдачи: повторный successful_payment с тем же id
+-- не создаст вторую запись и не начислит доступ дважды.
+CREATE TABLE IF NOT EXISTS payments (
+    charge_id   TEXT PRIMARY KEY,
+    user_id     INTEGER NOT NULL,
+    plan        TEXT NOT NULL,
+    stars       INTEGER NOT NULL,
+    paid_at     TEXT NOT NULL,
+    refunded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, paid_at DESC);
+"""
+]
 
 
 def _backup_before_migrate() -> None:

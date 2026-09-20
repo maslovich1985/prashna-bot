@@ -9,7 +9,11 @@ import pytest
 from app import db
 
 ADD_COLUMN = "ALTER TABLE users ADD COLUMN referrer_id INTEGER"
-ADD_TABLE = "CREATE TABLE IF NOT EXISTS payments (charge_id TEXT PRIMARY KEY)"
+ADD_TABLE = "CREATE TABLE IF NOT EXISTS demo (id INTEGER PRIMARY KEY)"
+
+# Реальные шаги уже применены к базе из фикстуры: свои проверки строим поверх них,
+# иначе тест начнёт падать при каждом новом шаге в MIGRATIONS.
+BASE = len(db.MIGRATIONS)
 
 
 def _user_version() -> int:
@@ -39,18 +43,18 @@ def test_fresh_db_is_marked_as_current(monkeypatch: pytest.MonkeyPatch, db_path:
 
 
 def test_old_db_gets_new_column(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _user_version() == 0  # фикстура создала базу при пустом MIGRATIONS
-    monkeypatch.setattr(db, "MIGRATIONS", [ADD_COLUMN])
+    assert _user_version() == BASE  # фикстура уже догнала базу до текущей версии
+    monkeypatch.setattr(db, "MIGRATIONS", [*db.MIGRATIONS, ADD_COLUMN])
 
     db.init()
 
     assert "referrer_id" in _columns("users")
-    assert _user_version() == 1
+    assert _user_version() == BASE + 1
 
 
 def test_data_survives_migration(monkeypatch: pytest.MonkeyPatch) -> None:
     db.upsert_user(1, "tester")
-    monkeypatch.setattr(db, "MIGRATIONS", [ADD_COLUMN])
+    monkeypatch.setattr(db, "MIGRATIONS", [*db.MIGRATIONS, ADD_COLUMN])
 
     db.init()
 
@@ -60,29 +64,30 @@ def test_data_survives_migration(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_second_init_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(db, "MIGRATIONS", [ADD_COLUMN])
+    monkeypatch.setattr(db, "MIGRATIONS", [*db.MIGRATIONS, ADD_COLUMN])
     db.init()
     db.init()  # повторный ALTER упал бы с duplicate column
-    assert _user_version() == 1
+    assert _user_version() == BASE + 1
 
 
 def test_only_pending_steps_apply(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(db, "MIGRATIONS", [ADD_COLUMN])
+    released = list(db.MIGRATIONS)
+    monkeypatch.setattr(db, "MIGRATIONS", [*released, ADD_COLUMN])
     db.init()
-    assert _user_version() == 1
+    assert _user_version() == BASE + 1
 
-    monkeypatch.setattr(db, "MIGRATIONS", [ADD_COLUMN, ADD_TABLE])
+    monkeypatch.setattr(db, "MIGRATIONS", [*released, ADD_COLUMN, ADD_TABLE])
     db.init()
 
-    assert _user_version() == 2
+    assert _user_version() == BASE + 2
     with db.conn() as c:
         assert c.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='payments'"
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo'"
         ).fetchone()
 
 
 def test_backup_failure_stops_migration(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(db, "MIGRATIONS", [ADD_COLUMN])
+    monkeypatch.setattr(db, "MIGRATIONS", [*db.MIGRATIONS, ADD_COLUMN])
     monkeypatch.setattr(
         db, "_backup_before_migrate", lambda: (_ for _ in ()).throw(RuntimeError("нет копии"))
     )
@@ -92,13 +97,13 @@ def test_backup_failure_stops_migration(monkeypatch: pytest.MonkeyPatch) -> None
 
     # Схема не тронута: без свежей копии откат кода остался бы с уехавшей схемой
     assert "referrer_id" not in _columns("users")
-    assert _user_version() == 0
+    assert _user_version() == BASE
 
 
 def test_no_backup_when_nothing_to_apply(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[int] = []
     monkeypatch.setattr(db, "_backup_before_migrate", lambda: calls.append(1))
 
-    db.init()  # MIGRATIONS пуст — бэкап дёргать не за чем
+    db.init()  # все шаги уже применены — бэкап дёргать не за чем
 
     assert calls == []
