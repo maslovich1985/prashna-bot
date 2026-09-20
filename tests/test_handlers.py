@@ -104,7 +104,17 @@ async def test_stats_for_non_admin_reveals_nothing(
 ) -> None:
     monkeypatch.setattr(basic, "settings", dataclasses.replace(settings, admin_ids=(999,)))
     sent = await feed("/stats")
-    assert all("users" not in s.text for s in sent)
+    assert [s.text for s in sent] == [texts.STATS_DENIED]
+    assert all(str(value) not in sent[0].text for value in db.stats().values())
+
+
+async def test_stats_for_admin_shows_counters(
+    feed, no_network, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(basic, "settings", dataclasses.replace(settings, admin_ids=(USER_ID,)))
+    sent = await feed("/stats")
+    assert sent[-1].text != texts.STATS_DENIED
+    assert all(key in sent[-1].text for key in db.stats())
 
 
 async def test_unknown_non_text_message_falls_back(feed, no_network) -> None:

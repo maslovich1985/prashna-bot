@@ -61,6 +61,7 @@ UNLIMITED_PLAIN = "∞ безлимит"
 HISTORY_EMPTY = "История пуста."
 HISTORY_HEADER = "<b>Последние вопросы:</b>"
 HISTORY_HINT = "\nКарта и ответ: /chart &lt;номер&gt;"
+STATS_DENIED = "Статистика доступна только администратору бота."
 CHART_USAGE = "Укажите номер из /history, например: <code>/chart 12</code>"
 CHART_NOT_FOUND = "Такой прашны в вашей истории нет."
 
