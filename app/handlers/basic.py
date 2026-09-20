@@ -91,6 +91,8 @@ async def forget(msg: Message) -> None:
 @router.message(Command("stats"))
 async def stats(msg: Message) -> None:
     if msg.from_user.id not in settings.admin_ids:
+        # Молчаливый return выглядел как поломка бота, а не как отказ.
+        await msg.answer(texts.STATS_DENIED)
         return
     s = db.stats()
     await msg.answer("\n".join(f"{k}: {v}" for k, v in s.items()))
