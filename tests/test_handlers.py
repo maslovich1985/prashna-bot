@@ -437,3 +437,37 @@ async def test_admin_is_not_capped(feed, monkeypatch: pytest.MonkeyPatch, no_net
 
     sent = await feed("ну что там вообще, интересно")
     assert texts.TOO_MANY_REJECTS not in [s.text for s in sent if s.text]
+
+
+# --- C-05: оговорка на слабой карте ---------------------------------------- #
+
+
+async def test_caution_is_delivered_and_charged(feed, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Слабая карта: толкование выдаётся с оговоркой, квант списывается."""
+    monkeypatch.setattr(
+        prashna_handlers,
+        "_validity_of",
+        lambda *a, **kw: validity.Verdict(status=validity.CAUTION, reason="Луна в 8-м доме."),
+    )
+
+    async def answered(*args: Any, **kwargs: Any) -> llm.Answer:
+        return llm.Answer(text="Вердикт: да. " + "Обоснование. " * 20)
+
+    monkeypatch.setattr(prashna_handlers.llm, "interpret", answered)
+    before = db.entitlement_for(USER_ID).left
+
+    sent = await feed("Получу ли я эту работу в этом году?")
+    texts_sent = [s.text for s in sent if s.text]
+
+    assert any("Карта слабая" in t and "Луна в 8-м доме." in t for t in texts_sent)
+    assert db.entitlement_for(USER_ID).left == before - 1
+    assert len(db.history(USER_ID, 10)) == 1
+
+
+async def test_no_caution_note_on_a_clean_chart(feed, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def answered(*args: Any, **kwargs: Any) -> llm.Answer:
+        return llm.Answer(text="Вердикт: да. " + "Обоснование. " * 20)
+
+    monkeypatch.setattr(prashna_handlers.llm, "interpret", answered)
+    sent = await feed("Получу ли я эту работу в этом году?")
+    assert not any("Карта слабая" in (s.text or "") for s in sent)

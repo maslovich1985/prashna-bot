@@ -31,6 +31,75 @@ def detect_house(question: str) -> int:
     return detect_house_scored(question)[0]
 
 
+CONNECTION_SENTENCES = {
+    "same_lord": (
+        "Владыка лагны и владыка дома вопроса — одна планета: "
+        "сильная связь вопрошающего с предметом вопроса (благоприятно)."
+    ),
+    "conjunct": (
+        "Владыка лагны и владыка дома вопроса в соединении — прямая связь, результат вероятен."
+    ),
+    "opposition": (
+        "Владыка лагны и владыка дома вопроса в оппозиции (7/7) — "
+        "связь есть, но через противостояние/переговоры."
+    ),
+    "none": (
+        "Прямой связи (соединение/оппозиция) между владыкой лагны "
+        "и владыкой дома вопроса нет — событие требует дополнительных усилий."
+    ),
+}
+
+
+def connection_kind(chart: PrashnaChart) -> str:
+    """Связь владыки лагны с владыкой дома вопроса: один из четырёх исходов.
+
+    Вынесено из `judgment_factors`, чтобы проверка валидности (C-05) читала тот же
+    расчёт, а не сверяла готовые русские фразы подстрокой.
+    """
+    asc = chart.asc_sign
+    qh_sign = (asc + chart.question_house - 1) % 12
+    lagna_lord = C.SIGN_LORDS[asc]
+    qh_lord = C.SIGN_LORDS[qh_sign]
+    if lagna_lord == qh_lord:
+        return "same_lord"
+    ll = chart.planets[lagna_lord]
+    ql = chart.planets[qh_lord]
+    if ll.sign == ql.sign:
+        return "conjunct"
+    if houses_between(ll.sign, ql.sign) == 7:
+        return "opposition"
+    return "none"
+
+
+def lagna_lord_of(chart: PrashnaChart):
+    return chart.planets[C.SIGN_LORDS[chart.asc_sign]]
+
+
+def weakness_notes(chart: PrashnaChart) -> list[str]:
+    """Признаки слабой, но читаемой карты (§5.5): основание для `caution`.
+
+    Считаются по тем же полям карты, что и `judgment_factors`, — ничего заново
+    не вычисляется, просто факты берутся напрямую, а не из готовых предложений.
+    """
+    notes: list[str] = []
+    moon = chart.planets["Луна"]
+    if moon.house in (6, 8, 12):
+        notes.append(f"Луна в {moon.house}-м доме (дустхана) — ум вопрошающего встревожен.")
+
+    ll = lagna_lord_of(chart)
+    if ll.combust:
+        notes.append(f"Владыка лагны {ll.name} сожжён — вопрошающий действует вслепую.")
+    if ll.retro:
+        notes.append(f"Владыка лагны {ll.name} ретрограден — намерение колеблется.")
+
+    if connection_kind(chart) == "none":
+        notes.append(
+            "Между владыкой лагны и владыкой дома вопроса нет прямой связи — "
+            "исход слабо зависит от вопрошающего."
+        )
+    return notes
+
+
 def _benefic_malefic(name: str) -> str:
     return "благодетель" if name in C.BENEFICS else "вредитель"
 
@@ -74,32 +143,8 @@ def judgment_factors(chart: PrashnaChart) -> list[str]:
         + "."
     )
 
-    # Связь лагнеша и владыки дома вопроса
-    if lagna_lord == qh_lord:
-        out.append(
-            "Владыка лагны и владыка дома вопроса — одна планета: "
-            "сильная связь вопрошающего с предметом вопроса (благоприятно)."
-        )
-    else:
-        same_sign = ll.sign == ql.sign
-        if same_sign:
-            out.append(
-                "Владыка лагны и владыка дома вопроса в соединении — "
-                "прямая связь, результат вероятен."
-            )
-        elif houses_between(ll.sign, ql.sign) == 7:
-            out.append(
-                "Владыка лагны и владыка дома вопроса в оппозиции (7/7) — "
-                "связь есть, но через противостояние/переговоры."
-            )
-        elif ll.sign == ql.sign:
-            out.append("Планеты связаны.")
-        else:
-            out.append(
-                "Прямой связи (соединение/оппозиция) между владыкой лагны "
-                "и владыкой дома вопроса нет — "
-                "событие требует дополнительных усилий."
-            )
+    # Связь лагнеша и владыки дома вопроса — одна и та же оценка, что и у caution (C-05)
+    out.append(CONNECTION_SENTENCES[connection_kind(chart)])
 
     # Кендры/триконы и дустхана
     for label, p in (("Владыка лагны", ll), (f"Владыка {qh}-го дома", ql), ("Луна", moon)):
