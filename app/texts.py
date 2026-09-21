@@ -132,6 +132,22 @@ def prashna_accepted(question: str, when: str, tz: str, place: str, short_chart:
     )
 
 
+def alert_llm_auth(detail: str) -> str:
+    return (
+        "🚨 <b>Groq отверг ключ</b>\n"
+        f"{detail}\n"
+        "Толкования не выдаются. Проверьте GROQ_API_KEY и биллинг — само не рассосётся."
+    )
+
+
+def alert_chart_failed(user_id: int, detail: str) -> str:
+    return (
+        "🚨 <b>Не рассчиталась карта</b>\n"
+        f"Пользователь {user_id}: {detail}\n"
+        "Это баг расчёта, а не внешний сбой."
+    )
+
+
 def delivery_failed(pid: int) -> str:
     return (
         "Не удалось отправить толкование целиком — оно сохранено, "
