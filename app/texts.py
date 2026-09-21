@@ -148,6 +148,16 @@ def alert_chart_failed(user_id: int, detail: str) -> str:
     )
 
 
+def prashna_rejected(reason: str, retry_local: str | None) -> str:
+    """Отказ по валидности: причина, срок и отметка, что вопрос не списан."""
+    tail = (
+        f"\n\nСпросите снова после {retry_local} — к этому времени карта станет пригодной."
+        if retry_local
+        else ""
+    )
+    return f"🚫 <b>Эта карта не годится для суждения</b>\n\n{reason}{tail}\n\nВопрос не списан."
+
+
 def delivery_failed(pid: int) -> str:
     return (
         "Не удалось отправить толкование целиком — оно сохранено, "

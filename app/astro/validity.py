@@ -83,17 +83,23 @@ class Verdict:
         return self.status == CAUTION
 
 
-def no_clear_house(_chart: PrashnaChart, question: str) -> Verdict:
+def check_question(question: str) -> Verdict:
     """Вопрос без ясного дома: ни одно ключевое слово не набрало `HOUSE_MIN_SCORE`.
 
-    Самое частое и дешёвое правило. `detect_house` в таком случае молча отдаёт дом 1,
-    и толкование выходит уверенным, но ни о чём. Ждать тут нечего — помогает только
-    переформулировка, поэтому `retry_at` остаётся пустым.
+    Карта для этого не нужна, поэтому проверку можно звать до резерва и до расчёта —
+    ни кванта, ни CPU. `detect_house` иначе молча отдаёт дом 1, и толкование выходит
+    уверенным, но ни о чём. Ждать тут нечего: помогает переформулировка, а не время,
+    поэтому `retry_at` остаётся пустым.
     """
     _house, score = detect_house_scored(question)
     if score >= C.HOUSE_MIN_SCORE:
         return Verdict()
     return Verdict(status=REJECT, reason=NO_CLEAR_HOUSE_REASON)
+
+
+def no_clear_house(_chart: PrashnaChart, question: str) -> Verdict:
+    """То же правило в общем списке — на случай, если карту всё же посчитали."""
+    return check_question(question)
 
 
 @dataclass(frozen=True)

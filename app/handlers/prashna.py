@@ -17,7 +17,8 @@ from aiogram.types import Message
 
 from .. import alerts, db, llm, texts
 from ..astro import constants as C
-from ..astro.chart import build_chart
+from ..astro import validity
+from ..astro.chart import PrashnaChart, build_chart, sky_at
 from ..astro.prashna import detect_house, judgment_factors, render_chart_text, render_short
 from ..config import settings
 from ..geo import Place
@@ -60,6 +61,13 @@ async def prashna(msg: Message, state: FSMContext) -> None:
         await msg.answer(texts.QUESTION_TOO_LONG)
         return
 
+    # Вопрос без ясного дома виден по одному тексту: отказываем до резерва и до
+    # расчёта карты — ни кванта, ни CPU (§5.5.1, правило 1).
+    house_verdict = validity.check_question(question)
+    if house_verdict.rejected:
+        await msg.answer(texts.prashna_rejected(house_verdict.reason, None))
+        return
+
     db.upsert_user(msg.from_user.id, msg.from_user.username)
     # Место нужно для лагны, поэтому геоданные берём до резерва: иначе их сбой
     # списал бы квант ни за что.
@@ -82,6 +90,23 @@ async def prashna(msg: Message, state: FSMContext) -> None:
             db.release(res)
 
 
+def _validity_of(
+    user_id: int, question: str, chart: PrashnaChart, place: Place
+) -> validity.Verdict:
+    """Проверка валидности целиком в потоке: перебор моментов для `retry_at` — это CPU."""
+    history = [
+        validity.PastAsk(pid=row["id"], question=row["question"], asc_sign=row["asc_sign"])
+        for row in db.recent_prashna(user_id, C.REPEAT_WINDOW_HOURS)
+    ]
+    return validity.check(
+        chart,
+        question,
+        user_id,
+        history=history,
+        sky_at=lambda moment: sky_at(moment, place.lat, place.lon, settings.ayanamsa),
+    )
+
+
 async def _answer(msg: Message, question: str, place: Place) -> bool:
     """Карта → толкование → доставка. True = толкование дошло, квант списан по делу."""
     moment = datetime.now(timezone.utc)  # момент вопроса
@@ -102,6 +127,7 @@ async def _answer(msg: Message, question: str, place: Place) -> bool:
         )
         chart_text = render_chart_text(chart)
         factors = judgment_factors(chart)
+        verdict = await asyncio.to_thread(_validity_of, msg.from_user.id, question, chart, place)
     except Exception as e:
         log.exception("Ошибка расчёта карты")
         await alerts.notify(
@@ -112,6 +138,7 @@ async def _answer(msg: Message, question: str, place: Place) -> bool:
 
     # Карта уходит до обращения к LLM: если толкование не придёт, у пользователя
     # всё равно останется расчёт на момент вопроса — повторить его уже нельзя.
+    # По той же причине карту показываем и при отказе: видно, что расчёт был.
     await msg.answer(
         texts.prashna_accepted(
             html.escape(question),
@@ -121,6 +148,26 @@ async def _answer(msg: Message, question: str, place: Place) -> bool:
             render_short(chart),
         )
     )
+
+    if verdict.rejected:
+        retry_local = (
+            verdict.retry_at.astimezone(chart.when_local.tzinfo).strftime("%H:%M")
+            if verdict.retry_at
+            else None
+        )
+        db.save_prashna(
+            msg.from_user.id,
+            question,
+            house,
+            place.name,
+            chart_text,
+            answer="",
+            asc_sign=chart.asc_sign,
+            reject_reason=verdict.reason,
+        )
+        await msg.answer(texts.prashna_rejected(verdict.reason, retry_local))
+        # LLM не зовём, квант вернётся в finally: отказ не должен стоить вопроса.
+        return False
 
     await msg.bot.send_chat_action(msg.chat.id, ChatAction.TYPING)
     try:
@@ -136,7 +183,15 @@ async def _answer(msg: Message, question: str, place: Place) -> bool:
         await msg.answer(LLM_FAILURE_TEXTS.get(type(e), texts.LLM_UNAVAILABLE))
         return False
 
-    pid = db.save_prashna(msg.from_user.id, question, house, place.name, chart_text, answer.text)
+    pid = db.save_prashna(
+        msg.from_user.id,
+        question,
+        house,
+        place.name,
+        chart_text,
+        answer.text,
+        asc_sign=chart.asc_sign,
+    )
 
     # Сохранили до отправки: не принял Telegram — толкование не потеряно, лежит в /chart.
     try:
