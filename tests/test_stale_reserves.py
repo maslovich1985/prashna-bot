@@ -114,3 +114,35 @@ def test_save_prashna_without_lagna_keeps_null() -> None:
     # Обратная совместимость: старый вызов без asc_sign должен продолжать работать.
     pid = db.save_prashna(1, "Вопрос?", 10, "Томск", "КАРТА", "ОТВЕТ")
     assert db.get_prashna(1, pid)["asc_sign"] is None
+
+
+# --- C-08: счётчик отказов ------------------------------------------------- #
+
+
+def test_note_reject_counts_and_starts_cooldown() -> None:
+    assert db.rejects_today(1) == 0
+    assert db.note_reject(1) == 1
+    assert db.note_reject(1) == 2
+    assert db.rejects_today(1) == 2
+    # Кулдаун обязан действовать и на отказы, иначе отказ дешевле вопроса.
+    res, reason = db.reserve(1, cooldown=30)
+    assert res is None
+    assert "Подождите" in reason
+
+
+def test_reject_does_not_spend_a_quantum() -> None:
+    before = db.entitlement_for(1).left
+    db.note_reject(1)
+    assert db.entitlement_for(1).left == before
+
+
+def test_rejects_are_isolated_per_user_and_day() -> None:
+    db.note_reject(1)
+    assert db.rejects_today(2) == 0
+
+    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    with db.conn() as c:
+        c.execute(
+            "INSERT INTO usage (user_id, day, count, rejects) VALUES (3, ?, 0, 9)", (yesterday,)
+        )
+    assert db.rejects_today(3) == 0

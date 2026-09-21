@@ -57,6 +57,9 @@ CREATE TABLE IF NOT EXISTS usage (
     -- NULL = вопрос закрыт (commit) или квант уже возвращён (release).
     reserved_at  TEXT,
     reserved_src TEXT,
+    -- Отказы валидности за сутки: отказ не списывает квант, но считает карту,
+    -- то есть стоит CPU. Без потолка цикл «отказ → снова» заменяет платные вопросы.
+    rejects      INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, day)
 );
 
@@ -108,6 +111,12 @@ def conn() -> Iterator[sqlite3.Connection]:
         c.commit()
     finally:
         c.close()
+
+
+def _add_rejects_column(c: sqlite3.Connection) -> None:
+    have = {r["name"] for r in c.execute("PRAGMA table_info(usage)")}
+    if "rejects" not in have:
+        c.execute("ALTER TABLE usage ADD COLUMN rejects INTEGER NOT NULL DEFAULT 0")
 
 
 def _add_reject_reason_column(c: sqlite3.Connection) -> None:
@@ -169,6 +178,8 @@ CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, paid_at DESC);
     _add_asc_sign_column,
     # 3 → 4: причина отказа в prashna (C-07).
     _add_reject_reason_column,
+    # 4 → 5: счётчик отказов в usage (C-08).
+    _add_rejects_column,
 ]
 
 
@@ -396,6 +407,34 @@ def reserve(user_id: int, cooldown: int) -> tuple[Reservation | None, str]:
                 (user_id, _now()),
             )
     return Reservation(user_id=user_id, source=ent.source, day=day), ""
+
+
+def rejects_today(user_id: int) -> int:
+    with conn() as c:
+        row = c.execute(
+            "SELECT rejects FROM usage WHERE user_id=? AND day=?", (user_id, _today())
+        ).fetchone()
+    return int(row["rejects"]) if row else 0
+
+
+def note_reject(user_id: int) -> int:
+    """Считает отказ и продлевает кулдаун. Возвращает число отказов за сутки.
+
+    `last_at` трогаем намеренно: `COOLDOWN_SECONDS` обязан действовать и на отказы,
+    иначе отказ оказывается дешевле обычного вопроса и его выгодно повторять.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with conn() as c:
+        c.execute(
+            "INSERT INTO usage (user_id, day, count, last_at, rejects) VALUES (?,?,0,?,1) "
+            "ON CONFLICT(user_id, day) DO UPDATE SET "
+            "rejects = usage.rejects + 1, last_at = excluded.last_at",
+            (user_id, _today(), now),
+        )
+        row = c.execute(
+            "SELECT rejects FROM usage WHERE user_id=? AND day=?", (user_id, _today())
+        ).fetchone()
+    return int(row["rejects"])
 
 
 def commit(res: Reservation) -> None:
