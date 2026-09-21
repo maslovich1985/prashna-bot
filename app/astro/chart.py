@@ -326,6 +326,32 @@ def panchanga(sun_lon: float, moon_lon: float, local: datetime) -> dict[str, str
 # --------------------------------------------------------------------------- #
 
 
+@dataclass(frozen=True)
+class Sky:
+    """Только лагна и светила — то, на чём держатся геометрические правила §5.5.1.
+
+    Полный `build_chart` считает 8 варг, аспекты, арудхи и дашу; перебирать им
+    180 моментов подряд ради одной даты — верный способ положить 1 vCPU.
+    """
+
+    asc_lon: float
+    moon_lon: float
+    sun_lon: float
+
+
+def sky_at(moment_utc: datetime, lat: float, lon: float, ayanamsa: str = "LAHIRI") -> Sky:
+    """Дешёвый срез неба: один `houses_ex` и два `calc_ut` вместо целой карты."""
+    swe.set_sid_mode(AYANAMSA_MODES.get(ayanamsa.upper(), swe.SIDM_LAHIRI), 0, 0)
+    ut = moment_utc.astimezone(timezone.utc)
+    jd = swe.julday(
+        ut.year, ut.month, ut.day, ut.hour + ut.minute / 60 + ut.second / 3600, swe.GREG_CAL
+    )
+    _cusps, ascmc = swe.houses_ex(jd, lat, lon, b"W", swe.FLG_SIDEREAL)
+    moon, _ = swe.calc_ut(jd, swe.MOON, FLAGS)
+    sun, _ = swe.calc_ut(jd, swe.SUN, FLAGS)
+    return Sky(asc_lon=norm360(ascmc[0]), moon_lon=norm360(moon[0]), sun_lon=norm360(sun[0]))
+
+
 def build_chart(
     moment_utc: datetime,
     lat: float,

@@ -10,11 +10,11 @@ from __future__ import annotations
 import difflib
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 
 from . import constants as C
-from .chart import PrashnaChart
+from .chart import PrashnaChart, Sky
 from .prashna import detect_house_scored
 
 NO_CLEAR_HOUSE_REASON = (
@@ -136,6 +136,11 @@ def repeated_question(chart: PrashnaChart, question: str, history: Sequence[Past
     return Verdict()
 
 
+# Правило — функция (карта, вопрос) → Verdict. Порядок в списках ниже и есть
+# порядок проверки, от дешёвого к астрологическому.
+Rule = Callable[[PrashnaChart, str], Verdict]
+
+
 def arc_distance(lon: float, point: float) -> float:
     """Кратчайшее расстояние по кругу между долготой и точкой, в градусах."""
     diff = abs((lon - point) % 360.0)
@@ -152,38 +157,77 @@ def sign_boundary_distance(lon: float) -> float:
     return arc_distance(lon, round(lon / 30.0) * 30.0)
 
 
-def lagna_gandanta(chart: PrashnaChart, _question: str) -> Verdict:
-    if gandanta_distance(chart.asc_lon) <= C.GANDANTA_ORB:
-        return Verdict(status=REJECT, reason=LAGNA_GANDANTA_REASON)
-    return Verdict()
+def geometry_reason(sky: Sky) -> str:
+    """Причина отказа по геометрии или пустая строка.
+
+    Одна функция на все геометрические правила: и полная карта, и дешёвый срез
+    неба (C-06) проверяются одним кодом, иначе перебор моментов начнёт расходиться
+    с настоящей проверкой. Порядок важен — гандānта конкретнее сандхи.
+    """
+    if gandanta_distance(sky.asc_lon) <= C.GANDANTA_ORB:
+        return LAGNA_GANDANTA_REASON
+    if sign_boundary_distance(sky.asc_lon) <= C.BHAVA_SANDHI_ORB:
+        return LAGNA_SANDHI_REASON
+    if gandanta_distance(sky.moon_lon) <= C.GANDANTA_ORB:
+        return MOON_GANDANTA_REASON
+    if arc_distance(sky.moon_lon, sky.sun_lon) <= C.KSHINA_CHANDRA_ORB:
+        return KSHINA_CHANDRA_REASON
+    return ""
 
 
-def lagna_bhava_sandhi(chart: PrashnaChart, _question: str) -> Verdict:
-    """Проверяется после гандānты: там причина конкретнее, а точки те же."""
-    if sign_boundary_distance(chart.asc_lon) <= C.BHAVA_SANDHI_ORB:
-        return Verdict(status=REJECT, reason=LAGNA_SANDHI_REASON)
-    return Verdict()
+# Причины, которые уходят со временем: лагна и Луна движутся. Для «нет ясного дома»
+# и повторного вопроса срок бессмыслен — там помогает переформулировка или /chart.
+GEOMETRY_REASONS = frozenset(
+    {LAGNA_GANDANTA_REASON, LAGNA_SANDHI_REASON, MOON_GANDANTA_REASON, KSHINA_CHANDRA_REASON}
+)
 
 
-def moon_gandanta(chart: PrashnaChart, _question: str) -> Verdict:
-    moon = chart.planets.get("Луна")
-    if moon and gandanta_distance(moon.lon) <= C.GANDANTA_ORB:
-        return Verdict(status=REJECT, reason=MOON_GANDANTA_REASON)
-    return Verdict()
-
-
-def kshina_chandra(chart: PrashnaChart, _question: str) -> Verdict:
-    """Луна вблизи Солнца. Расстояние берём по кругу: 359° от Солнца — это 1°, а не 359°."""
+def sky_of(chart: PrashnaChart) -> Sky:
     moon = chart.planets.get("Луна")
     sun = chart.planets.get("Солнце")
-    if moon and sun and arc_distance(moon.lon, sun.lon) <= C.KSHINA_CHANDRA_ORB:
-        return Verdict(status=REJECT, reason=KSHINA_CHANDRA_REASON)
-    return Verdict()
+    return Sky(
+        asc_lon=chart.asc_lon, moon_lon=moon.lon if moon else 0.0, sun_lon=sun.lon if sun else 0.0
+    )
 
 
-# Правило — функция (карта, вопрос) → Verdict. Списки наполняются в C-02…C-05:
-# порядок здесь и есть порядок проверки, от дешёвого к астрологическому.
-Rule = Callable[[PrashnaChart, str], Verdict]
+def _geometry_rule(reason: str) -> Rule:
+    """Оборачивает одну причину в правило: список правил остаётся читаемым перечнем."""
+
+    def rule(chart: PrashnaChart, _question: str) -> Verdict:
+        if geometry_reason(sky_of(chart)) == reason:
+            return Verdict(status=REJECT, reason=reason)
+        return Verdict()
+
+    return rule
+
+
+lagna_gandanta = _geometry_rule(LAGNA_GANDANTA_REASON)
+lagna_bhava_sandhi = _geometry_rule(LAGNA_SANDHI_REASON)
+moon_gandanta = _geometry_rule(MOON_GANDANTA_REASON)
+kshina_chandra = _geometry_rule(KSHINA_CHANDRA_REASON)
+
+
+def find_retry_moment(
+    start: datetime,
+    sky_at: Callable[[datetime], Sky],
+    limit_minutes: int | None = None,
+    step_minutes: int | None = None,
+) -> datetime | None:
+    """Первый момент после `start`, когда геометрия перестаёт мешать.
+
+    Шагаем вперёд по минуте: лагна проходит градус примерно за четыре минуты,
+    так что минутного шага хватает, чтобы не проскочить окно. `None` означает,
+    что за `limit_minutes` просвета не нашлось — обещать срок в таком случае нечестно.
+    """
+    limit = C.RETRY_SEARCH_MINUTES if limit_minutes is None else limit_minutes
+    step = C.RETRY_SEARCH_STEP_MINUTES if step_minutes is None else step_minutes
+    for minute in range(step, limit + 1, step):
+        moment = start + timedelta(minutes=minute)
+        if not geometry_reason(sky_at(moment)):
+            return moment
+    return None
+
+
 REJECT_RULES: list[Rule] = [
     no_clear_house,
     lagna_gandanta,
@@ -195,13 +239,21 @@ CAUTION_RULES: list[Rule] = []
 
 
 def check(
-    chart: PrashnaChart, question: str, user_id: int, history: Sequence[PastAsk] = ()
+    chart: PrashnaChart,
+    question: str,
+    user_id: int,
+    history: Sequence[PastAsk] = (),
+    sky_at: Callable[[datetime], Sky] | None = None,
 ) -> Verdict:
     """Собирает вердикт по включённым правилам. Первый `reject` прекращает разбор.
 
     `history` — прежние вопросы пользователя, которые достаёт вызывающий код:
     правилу повторного вопроса нужна БД, а модуль обязан оставаться чистым.
     Пустая история означает «не проверяем», а не «повторов не было».
+
+    `sky_at` — дешёвый срез неба на произвольный момент (`chart.sky_at`). Если он
+    передан, к геометрическому отказу добавляется срок «когда попробовать снова»:
+    отказ без срока бесполезен — пользователь ткнётся снова и решит, что бот сломан.
     """
     repeat = repeated_question(chart, question, history)
     if repeat.rejected:
@@ -211,6 +263,8 @@ def check(
     for rule in REJECT_RULES:
         verdict = rule(chart, question)
         if verdict.rejected:
+            if sky_at is not None and verdict.reason in GEOMETRY_REASONS:
+                return replace(verdict, retry_at=find_retry_moment(chart.when_utc, sky_at))
             return verdict
     for rule in CAUTION_RULES:
         verdict = rule(chart, question)
