@@ -198,13 +198,19 @@ DDL из §5.3 через `MIGRATIONS`. `charge_id` как PRIMARY KEY — эт�
 `entitlements` и `payments` созданы. На проде `user_version` был 0, поэтому шаг применится при
 первом старте после деплоя — `migrate()` перед этим сам снимет бэкап.
 
-### B-02 · Тарифы константами — S
+### ✅ B-02 · Тарифы константами — S
 
 `TRIAL_QUESTIONS=2`, `REFERRAL_BONUS=2`, `REFERRAL_MAX=10`, `PLANS` (§5.2) в `app/constants.py`.
 Суммы в звёздах — из §15.1, до решения оставить заглушкой и не деплоить.
 
 **DoD:** `PLANS` типизирован (`Plan` — `dataclass`), значения не размазаны по коду.
 **Зависит:** —
+
+`app/constants.py`: `Plan` — frozen `dataclass` (`title`, `days`, `daily_limit`, `questions`,
+`stars`) со свойствами `is_subscription` и `sellable`. Цены в звёздах оставлены `None` — решение
+по §15.1 не принято, `sellable is False` не даёт выставить инвойс по непроставленной цене.
+`tests/test_constants.py` фиксирует заглушку: тест падает, когда цены проставят, — снимать его
+вместе с заглушкой.
 
 ### B-03 · Разрешение прав — M
 
