@@ -15,7 +15,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from .. import db, llm, texts
+from .. import alerts, db, llm, texts
 from ..astro import constants as C
 from ..astro.chart import build_chart
 from ..astro.prashna import detect_house, judgment_factors, render_chart_text, render_short
@@ -102,8 +102,11 @@ async def _answer(msg: Message, question: str, place: Place) -> bool:
         )
         chart_text = render_chart_text(chart)
         factors = judgment_factors(chart)
-    except Exception:
+    except Exception as e:
         log.exception("Ошибка расчёта карты")
+        await alerts.notify(
+            msg.bot, "chart_failed", texts.alert_chart_failed(msg.from_user.id, repr(e))
+        )
         await msg.answer(texts.CHART_FAILED)
         return False
 
@@ -127,6 +130,7 @@ async def _answer(msg: Message, question: str, place: Place) -> bool:
         if isinstance(e, llm.LLMAuthError):
             # Ключ протух или кончился биллинг — сервис стоит целиком, это не «попробуйте позже».
             log.error("Groq отверг ключ: %s", e)
+            await alerts.notify(msg.bot, "llm_auth", texts.alert_llm_auth(str(e)))
         else:
             log.error("LLM: %s", e)
         await msg.answer(LLM_FAILURE_TEXTS.get(type(e), texts.LLM_UNAVAILABLE))
