@@ -333,7 +333,7 @@ ADD COLUMN` не знает `IF NOT EXISTS`, а шаг обязан пережи
 
 Порядок внутри эпика = порядок реализации, от дешёвого к астрологическому.
 
-### C-01 · Каркас `validity.py` — S
+### ✅ C-01 · Каркас `validity.py` — S
 
 `app/astro/validity.py`: `check(chart, question, user_id) -> Verdict` с
 `Verdict(status: ok|caution|reject, reason, retry_at)`. Пороги — в `app/astro/constants.py`.
@@ -341,6 +341,25 @@ ADD COLUMN` не знает `IF NOT EXISTS`, а шаг обязан пережи
 
 **DoD:** модуль чистый, без импортов `db` и `llm`; нормальная карта → `ok`.
 **Зависит:** —
+
+`app/astro/validity.py`: `Verdict(status, reason, retry_at)` — frozen `dataclass` со свойствами
+`rejected` и `cautioned`, константы `OK` / `CAUTION` / `REJECT`, и `check(chart, question,
+user_id)`, который идёт по спискам `REJECT_RULES` и `CAUTION_RULES`. Первый `reject` прекращает
+разбор — считать остальные правила незачем; `caution` собираются все и склеиваются в одну
+оговорку.
+
+Правило — это `Callable[[PrashnaChart, str], Verdict]`, списки пока пустые: каждое правило
+включается своей задачей (C-02…C-05) вместе со своим тестом. `user_id` в сигнатуре есть, но
+не используется — он нужен правилу повторного вопроса (C-03), и получит историю параметром,
+а не импортом `db`, иначе модуль перестанет быть чистым.
+
+Пороги — в `app/astro/constants.py`: `HOUSE_MIN_SCORE`, `BHAVA_SANDHI_ORB`, `GANDANTA_ORB`,
+`GANDANTA_SIGNS`, `REPEAT_WINDOW_HOURS`, `MAX_REJECTS_PER_DAY`, `RETRY_SEARCH_MINUTES`,
+`RETRY_SEARCH_STEP_MINUTES`. Значения — первая прикидка из §5.5, их и предстоит крутить,
+глядя на долю отказов (§15.6).
+
+Чистота модуля проверяется тестом: `tests/test_validity.py` разбирает файл через `ast` и
+падает на импорте `db`, `llm` или aiogram.
 
 ### C-02 · Порог `detect_house` — S
 
