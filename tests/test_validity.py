@@ -11,9 +11,10 @@ from pathlib import Path
 import pytest
 import swisseph as swe
 
+from app.astro import chart as chart_module
 from app.astro import constants as C
 from app.astro import validity
-from app.astro.chart import build_chart
+from app.astro.chart import Sky, build_chart
 
 MOMENT = datetime(2026, 9, 21, 10, 0, tzinfo=timezone.utc)
 
@@ -346,3 +347,124 @@ def test_rejects_stay_a_minority_over_a_day() -> None:
     verdicts = [validity.check(_chart_at(m), "Получу ли я эту работу?", user_id=1) for m in moments]
     share = sum(v.rejected for v in verdicts) / len(verdicts)
     assert 0 < share < 0.30, f"доля отказов за сутки: {share:.0%}"
+
+
+# --- C-06: «когда попробовать снова» --------------------------------------- #
+
+
+def _fake_sky(schedule: dict[int, tuple[float, float, float]], default):
+    """Срез неба по минутам от начала: тест задаёт, когда именно станет чисто."""
+    start = MOMENT
+
+    def sky_at(moment: datetime) -> Sky:
+        minute = round((moment - start).total_seconds() / 60)
+        asc, moon, sun = schedule.get(minute, default)
+        return Sky(asc_lon=asc, moon_lon=moon, sun_lon=sun)
+
+    return sky_at
+
+
+BLOCKED = (0.0, 60.0, 200.0)  # лагна в гандānте
+CLEAR = (75.0, 60.0, 200.0)
+
+
+def test_retry_moment_is_the_first_clear_minute() -> None:
+    sky_at = _fake_sky({7: CLEAR, 8: CLEAR}, BLOCKED)
+    found = validity.find_retry_moment(MOMENT, sky_at)
+    assert found == MOMENT + timedelta(minutes=7)
+
+
+def test_retry_moment_is_in_the_future() -> None:
+    sky_at = _fake_sky({0: CLEAR, 5: CLEAR}, BLOCKED)
+    found = validity.find_retry_moment(MOMENT, sky_at)
+    # Нулевая минута — это сам момент вопроса, он уже отказной.
+    assert found > MOMENT
+
+
+def test_no_retry_moment_when_nothing_clears() -> None:
+    # Обещать срок, которого нет, хуже, чем не обещать: None честнее.
+    assert validity.find_retry_moment(MOMENT, _fake_sky({}, BLOCKED)) is None
+
+
+def test_retry_search_respects_the_limit() -> None:
+    sky_at = _fake_sky({C.RETRY_SEARCH_MINUTES + 10: CLEAR}, BLOCKED)
+    assert validity.find_retry_moment(MOMENT, sky_at) is None
+
+
+def test_geometric_reject_carries_retry_at(chart) -> None:
+    sky_at = _fake_sky({12: CLEAR}, BLOCKED)
+    verdict = validity.check(
+        _at(chart, asc_lon=0.0), "Получу ли я эту работу?", user_id=1, sky_at=sky_at
+    )
+    assert verdict.rejected
+    assert verdict.retry_at == chart.when_utc + timedelta(minutes=12)
+
+
+def test_retry_moment_really_passes_the_check(chart) -> None:
+    """DoD: в найденный момент проверка действительно даёт ok, а не только геометрия."""
+    sky_at = _fake_sky({9: CLEAR}, BLOCKED)
+    verdict = validity.check(
+        _at(chart, asc_lon=0.0), "Получу ли я эту работу?", user_id=1, sky_at=sky_at
+    )
+    sky = sky_at(verdict.retry_at)
+    future = _at(chart, asc_lon=sky.asc_lon, moon_lon=sky.moon_lon, sun_lon=sky.sun_lon)
+    assert validity.check(future, "Получу ли я эту работу?", user_id=1).status == validity.OK
+
+
+@pytest.mark.parametrize(
+    ("question", "history_factory"),
+    [
+        ("ну что там вообще", lambda chart: []),
+        ("Получу ли я эту работу?", lambda chart: [_past(chart, "Получу ли я эту работу?")]),
+    ],
+)
+def test_non_geometric_rejects_have_no_retry(chart, question, history_factory) -> None:
+    # Переформулировка и повтор от ожидания не лечатся — срок был бы ложью.
+    verdict = validity.check(
+        chart,
+        question,
+        user_id=1,
+        history=history_factory(chart),
+        sky_at=_fake_sky({1: CLEAR}, BLOCKED),
+    )
+    assert verdict.rejected
+    assert verdict.retry_at is None
+
+
+def test_check_without_sky_at_leaves_retry_empty(chart) -> None:
+    verdict = validity.check(_at(chart, asc_lon=0.0), "Получу ли я эту работу?", user_id=1)
+    assert verdict.rejected and verdict.retry_at is None
+
+
+@real_ephemeris
+def test_sky_at_matches_the_full_chart() -> None:
+    """Дешёвый срез обязан совпадать с полной картой, иначе перебор ищет не то."""
+    moment = datetime(2026, 9, 21, 10, 0, tzinfo=timezone.utc)
+    sky = chart_module.sky_at(moment, 56.5, 84.97)
+    full = _chart_at(moment)
+    assert sky.asc_lon == pytest.approx(full.asc_lon, abs=1e-6)
+    assert sky.moon_lon == pytest.approx(full.planets["Луна"].lon, abs=1e-6)
+    assert sky.sun_lon == pytest.approx(full.planets["Солнце"].lon, abs=1e-6)
+
+
+@real_ephemeris
+def test_retry_moment_on_a_real_sky() -> None:
+    """Поиск на настоящей эфемериде: найденный момент проходит проверку целиком."""
+    start = datetime(2026, 9, 21, 0, 0, tzinfo=timezone.utc)
+    blocked = next(
+        (
+            start + timedelta(minutes=step)
+            for step in range(0, 24 * 60, 2)
+            if validity.geometry_reason(
+                chart_module.sky_at(start + timedelta(minutes=step), 56.5, 84.97)
+            )
+        ),
+        None,
+    )
+    assert blocked is not None
+
+    found = validity.find_retry_moment(blocked, lambda m: chart_module.sky_at(m, 56.5, 84.97))
+    assert found is not None and found > blocked
+    assert validity.check(_chart_at(found), "Получу ли я эту работу?", user_id=1).status == (
+        validity.OK
+    )
