@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 
 import httpx
 
@@ -44,8 +45,37 @@ SYSTEM_PROMPT = """Ты — опытный джьотиши (ведически�
 """
 
 
+MIN_ANSWER_LEN = 200  # короче — это не толкование, а обрывок: не списываем
+
+
 class LLMError(RuntimeError):
-    pass
+    """Толкование не получено. Каждый подкласс — отдельная строка таблицы §5.4.1."""
+
+
+class LLMUnavailable(LLMError):
+    """Прокси недоступен, Groq 5xx, обрыв соединения."""
+
+
+class LLMRateLimited(LLMError):
+    """429 не рассосался за все ретраи."""
+
+
+class LLMAuthError(LLMError):
+    """401/403: ключ протух, отозван или кончился биллинг. Ретраи бесполезны."""
+
+
+class LLMTimeout(LLMError):
+    """Ответ не пришёл за `GROQ_TIMEOUT`."""
+
+
+class LLMEmptyAnswer(LLMError):
+    """Пусто или короче `MIN_ANSWER_LEN`."""
+
+
+@dataclass(frozen=True)
+class Answer:
+    text: str
+    truncated: bool = False
 
 
 def build_user_prompt(
@@ -68,7 +98,7 @@ async def interpret(
     chart_text: str,
     factors: list[str],
     retries: int = 3,
-) -> str:
+) -> Answer:
     payload = {
         "model": settings.groq_model,
         "temperature": 0.4,
@@ -88,23 +118,49 @@ async def interpret(
     url = settings.groq_base_url.rstrip("/") + "/chat/completions"
 
     last_err: Exception | None = None
+    rate_limited = False
+    timed_out = False
     for attempt in range(retries):
         try:
             async with httpx.AsyncClient(
                 timeout=settings.groq_timeout, proxy=settings.llm_proxy or None
             ) as client:
                 r = await client.post(url, json=payload, headers=headers)
+            if r.status_code in (401, 403):
+                # Ключ сам не починится: ретраи только жгут время пользователя.
+                raise LLMAuthError(f"Groq отверг ключ: HTTP {r.status_code}")
             if r.status_code == 429:
+                rate_limited = True
                 wait = float(r.headers.get("retry-after", 5))
                 log.warning("Groq rate limit, ждём %.1f с", wait)
                 await asyncio.sleep(min(wait, 20))
                 continue
             r.raise_for_status()
-            data = r.json()
-            return data["choices"][0]["message"]["content"].strip()
+            return _parse(r.json())
+        except (LLMAuthError, LLMEmptyAnswer):
+            raise
+        except httpx.TimeoutException as e:
+            timed_out = True
+            last_err = e
+            log.warning("Таймаут Groq (попытка %d)", attempt + 1)
+            await asyncio.sleep(2 * (attempt + 1))
         except Exception as e:
+            timed_out = False
             last_err = e
             log.warning("Ошибка запроса к Groq (попытка %d): %s", attempt + 1, e)
             await asyncio.sleep(2 * (attempt + 1))
 
-    raise LLMError(f"Groq недоступен: {last_err}")
+    if timed_out:
+        raise LLMTimeout(f"Groq не ответил вовремя: {last_err}")
+    if rate_limited and last_err is None:
+        raise LLMRateLimited("Groq вернул 429 на всех попытках")
+    raise LLMUnavailable(f"Groq недоступен: {last_err}")
+
+
+def _parse(data: dict) -> Answer:
+    choice = data["choices"][0]
+    text = (choice["message"]["content"] or "").strip()
+    if len(text) < MIN_ANSWER_LEN:
+        raise LLMEmptyAnswer(f"Ответ Groq короче {MIN_ANSWER_LEN} символов: {len(text)}")
+    # finish_reason=length — ответ упёрся в groq_max_tokens: он есть, но оборван.
+    return Answer(text=text, truncated=choice.get("finish_reason") == "length")
