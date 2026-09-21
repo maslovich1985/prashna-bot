@@ -11,7 +11,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
+from . import constants as C
 from .chart import PrashnaChart
+from .prashna import detect_house_scored
+
+NO_CLEAR_HOUSE_REASON = (
+    "По формулировке не видно, о какой области жизни вопрос, — "
+    "прашна строится на доме вопроса, и без него толкование будет ни о чём. "
+    "Спросите об одном конкретном деле: «получу ли я эту работу», "
+    "«вернёт ли он долг», «стоит ли переезжать в эту квартиру»."
+)
 
 OK = "ok"
 CAUTION = "caution"
@@ -41,10 +50,23 @@ class Verdict:
         return self.status == CAUTION
 
 
+def no_clear_house(_chart: PrashnaChart, question: str) -> Verdict:
+    """Вопрос без ясного дома: ни одно ключевое слово не набрало `HOUSE_MIN_SCORE`.
+
+    Самое частое и дешёвое правило. `detect_house` в таком случае молча отдаёт дом 1,
+    и толкование выходит уверенным, но ни о чём. Ждать тут нечего — помогает только
+    переформулировка, поэтому `retry_at` остаётся пустым.
+    """
+    _house, score = detect_house_scored(question)
+    if score >= C.HOUSE_MIN_SCORE:
+        return Verdict()
+    return Verdict(status=REJECT, reason=NO_CLEAR_HOUSE_REASON)
+
+
 # Правило — функция (карта, вопрос) → Verdict. Списки наполняются в C-02…C-05:
 # порядок здесь и есть порядок проверки, от дешёвого к астрологическому.
 Rule = Callable[[PrashnaChart, str], Verdict]
-REJECT_RULES: list[Rule] = []
+REJECT_RULES: list[Rule] = [no_clear_house]
 CAUTION_RULES: list[Rule] = []
 
 

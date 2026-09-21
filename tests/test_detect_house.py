@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.astro.prashna import detect_house
+from app.astro.prashna import detect_house, detect_house_scored
 
 CASES = [
     ("стоит ли мне менять что-то в жизни", 1),
@@ -45,3 +45,19 @@ def test_case_insensitive() -> None:
 
 def test_empty_question() -> None:
     assert detect_house("") == 1
+
+
+def test_score_is_zero_when_nothing_matched() -> None:
+    # Ноль отличает фолбэк на дом 1 от настоящего попадания в первый дом.
+    assert detect_house_scored("ну что там вообще") == (1, 0)
+
+
+def test_score_grows_with_matched_words() -> None:
+    house, score = detect_house_scored("Получу ли я оффер на новую работу?")
+    assert house == 10
+    assert score > 0
+
+
+def test_detect_house_matches_scored_variant() -> None:
+    for question in ("Вернёт ли он долг?", "ну что там вообще", "Будет ли ребенок?"):
+        assert detect_house(question) == detect_house_scored(question)[0]

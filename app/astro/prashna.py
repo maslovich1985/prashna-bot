@@ -8,8 +8,13 @@ from . import constants as C
 from .chart import PrashnaChart, dms, houses_between
 
 
-def detect_house(question: str) -> int:
-    """Определяет дом (бхаву), к которому относится вопрос, по ключевым словам."""
+def detect_house_scored(question: str) -> tuple[int, int]:
+    """Дом вопроса и его балл: сумма длин совпавших ключевых слов.
+
+    Балл нужен проверке валидности (§5.5.1): ноль означает, что ни одно слово не
+    совпало и дом 1 взят как фолбэк, а не найден. Без этого бот выдаёт уверенное
+    толкование по случайному дому.
+    """
     q = question.lower()
     scores: dict[int, int] = {}
     for house, words in C.HOUSE_KEYWORDS.items():
@@ -17,8 +22,13 @@ def detect_house(question: str) -> int:
             if w in q:
                 scores[house] = scores.get(house, 0) + len(w)
     if not scores:
-        return 1
-    return max(scores.items(), key=lambda kv: kv[1])[0]
+        return 1, 0
+    return max(scores.items(), key=lambda kv: kv[1])
+
+
+def detect_house(question: str) -> int:
+    """Определяет дом (бхаву), к которому относится вопрос, по ключевым словам."""
+    return detect_house_scored(question)[0]
 
 
 def _benefic_malefic(name: str) -> str:
