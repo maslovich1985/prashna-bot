@@ -25,6 +25,28 @@ NO_CLEAR_HOUSE_REASON = (
 )
 
 
+LAGNA_GANDANTA_REASON = (
+    "Лагна стоит на стыке водного и огненного знаков (гандānта) — "
+    "классически такая карта не читается: она описывает узел, а не развитие события."
+)
+
+LAGNA_SANDHI_REASON = (
+    "Лагна в считаных минутах от границы знака (бхава-сандхи). "
+    "Дома в этой карте привязаны к целым знакам, поэтому такая мелочь "
+    "переносит вопрос в соседний дом, и суждение получится о другом."
+)
+
+MOON_GANDANTA_REASON = (
+    "Луна на стыке накшатр гандānты — ум вопрошающего сейчас между двумя состояниями, "
+    "и карта отражает эту неопределённость, а не ответ."
+)
+
+KSHINA_CHANDRA_REASON = (
+    "Луна в новолунии (кшина-чандра): она лишена силы, а в прашне именно Луна "
+    "несёт вопрос. Толкование по такой карте классически считается недостоверным."
+)
+
+
 def repeat_reason(pid: int) -> str:
     return (
         "Этот вопрос вы уже задавали, и карта с тех пор почти не изменилась. "
@@ -114,10 +136,61 @@ def repeated_question(chart: PrashnaChart, question: str, history: Sequence[Past
     return Verdict()
 
 
+def arc_distance(lon: float, point: float) -> float:
+    """Кратчайшее расстояние по кругу между долготой и точкой, в градусах."""
+    diff = abs((lon - point) % 360.0)
+    return min(diff, 360.0 - diff)
+
+
+def gandanta_distance(lon: float) -> float:
+    """До ближайшего стыка воды и огня (0°, 120°, 240°)."""
+    return min(arc_distance(lon, point) for point in C.GANDANTA_POINTS)
+
+
+def sign_boundary_distance(lon: float) -> float:
+    """До ближайшей границы знака. Знаки целые, поэтому границы кратны 30°."""
+    return arc_distance(lon, round(lon / 30.0) * 30.0)
+
+
+def lagna_gandanta(chart: PrashnaChart, _question: str) -> Verdict:
+    if gandanta_distance(chart.asc_lon) <= C.GANDANTA_ORB:
+        return Verdict(status=REJECT, reason=LAGNA_GANDANTA_REASON)
+    return Verdict()
+
+
+def lagna_bhava_sandhi(chart: PrashnaChart, _question: str) -> Verdict:
+    """Проверяется после гандānты: там причина конкретнее, а точки те же."""
+    if sign_boundary_distance(chart.asc_lon) <= C.BHAVA_SANDHI_ORB:
+        return Verdict(status=REJECT, reason=LAGNA_SANDHI_REASON)
+    return Verdict()
+
+
+def moon_gandanta(chart: PrashnaChart, _question: str) -> Verdict:
+    moon = chart.planets.get("Луна")
+    if moon and gandanta_distance(moon.lon) <= C.GANDANTA_ORB:
+        return Verdict(status=REJECT, reason=MOON_GANDANTA_REASON)
+    return Verdict()
+
+
+def kshina_chandra(chart: PrashnaChart, _question: str) -> Verdict:
+    """Луна вблизи Солнца. Расстояние берём по кругу: 359° от Солнца — это 1°, а не 359°."""
+    moon = chart.planets.get("Луна")
+    sun = chart.planets.get("Солнце")
+    if moon and sun and arc_distance(moon.lon, sun.lon) <= C.KSHINA_CHANDRA_ORB:
+        return Verdict(status=REJECT, reason=KSHINA_CHANDRA_REASON)
+    return Verdict()
+
+
 # Правило — функция (карта, вопрос) → Verdict. Списки наполняются в C-02…C-05:
 # порядок здесь и есть порядок проверки, от дешёвого к астрологическому.
 Rule = Callable[[PrashnaChart, str], Verdict]
-REJECT_RULES: list[Rule] = [no_clear_house]
+REJECT_RULES: list[Rule] = [
+    no_clear_house,
+    lagna_gandanta,
+    lagna_bhava_sandhi,
+    moon_gandanta,
+    kshina_chandra,
+]
 CAUTION_RULES: list[Rule] = []
 
 

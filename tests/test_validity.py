@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import ast
+import dataclasses
 from dataclasses import FrozenInstanceError
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+import swisseph as swe
 
 from app.astro import constants as C
 from app.astro import validity
@@ -64,7 +66,13 @@ def test_cautions_are_collected(monkeypatch: pytest.MonkeyPatch, chart) -> None:
 
 def test_only_enabled_rules_are_listed() -> None:
     # Правила включаются по одному в C-02…C-05, каждое со своим тестом.
-    assert validity.REJECT_RULES == [validity.no_clear_house]
+    assert validity.REJECT_RULES == [
+        validity.no_clear_house,
+        validity.lagna_gandanta,
+        validity.lagna_bhava_sandhi,
+        validity.moon_gandanta,
+        validity.kshina_chandra,
+    ]
     assert validity.CAUTION_RULES == []
 
 
@@ -204,3 +212,137 @@ def test_repeat_wins_over_other_rules(chart) -> None:
     history = [_past(chart, "ну что там вообще")]
     verdict = validity.check(chart, "ну что там вообще", user_id=1, history=history)
     assert "/chart 7" in verdict.reason
+
+
+# --- C-04: геометрические правила ------------------------------------------ #
+
+
+def _at(chart, *, asc_lon=None, moon_lon=None, sun_lon=None):
+    """Карта с подменёнными долготами: правило проверяется на геометрии, а не на дате."""
+    planets = dict(chart.planets)
+    if moon_lon is not None:
+        planets["Луна"] = dataclasses.replace(planets["Луна"], lon=moon_lon)
+    if sun_lon is not None:
+        planets["Солнце"] = dataclasses.replace(planets["Солнце"], lon=sun_lon)
+    return dataclasses.replace(
+        chart, asc_lon=chart.asc_lon if asc_lon is None else asc_lon, planets=planets
+    )
+
+
+@pytest.mark.parametrize("lon", [0.0, 119.5, 120.0, 121.9, 239.0, 359.5])
+def test_lagna_in_gandanta_is_rejected(chart, lon: float) -> None:
+    verdict = validity.check(_at(chart, asc_lon=lon), "Получу ли я эту работу?", user_id=1)
+    assert verdict.rejected
+    assert "гандānта" in verdict.reason
+
+
+@pytest.mark.parametrize("lon", [15.0, 105.0, 135.0, 225.0, 315.0])
+def test_lagna_away_from_junctions_passes(chart, lon: float) -> None:
+    assert validity.check(_at(chart, asc_lon=lon), "Получу ли я эту работу?", user_id=1).status == (
+        validity.OK
+    )
+
+
+@pytest.mark.parametrize("lon", [29.5, 30.0, 31.5, 59.0, 271.0])
+def test_lagna_near_sign_border_is_rejected(chart, lon: float) -> None:
+    verdict = validity.check(_at(chart, asc_lon=lon), "Получу ли я эту работу?", user_id=1)
+    assert verdict.rejected
+    assert "границы знака" in verdict.reason
+
+
+def test_gandanta_reason_wins_over_sandhi(chart) -> None:
+    # 0° — и стык знаков, и гандānта. Причина должна быть конкретнее.
+    verdict = validity.check(_at(chart, asc_lon=0.0), "Получу ли я эту работу?", user_id=1)
+    assert "гандānта" in verdict.reason
+
+
+@pytest.mark.parametrize("lon", [0.5, 120.0, 241.0])
+def test_moon_in_gandanta_nakshatra_is_rejected(chart, lon: float) -> None:
+    verdict = validity.check(
+        _at(chart, asc_lon=75.0, moon_lon=lon, sun_lon=200.0), "Получу ли я эту работу?", user_id=1
+    )
+    assert verdict.rejected
+    assert "Луна на стыке" in verdict.reason
+
+
+@pytest.mark.parametrize(("moon", "sun"), [(100.0, 100.0), (95.0, 100.0), (350.0, 355.0)])
+def test_kshina_chandra_is_rejected(chart, moon: float, sun: float) -> None:
+    verdict = validity.check(
+        _at(chart, asc_lon=75.0, moon_lon=moon, sun_lon=sun), "Получу ли я эту работу?", user_id=1
+    )
+    assert verdict.rejected
+    assert "новолуние" in verdict.reason.lower() or "кшина" in verdict.reason.lower()
+
+
+def test_moon_far_from_sun_passes(chart) -> None:
+    verdict = validity.check(
+        _at(chart, asc_lon=75.0, moon_lon=100.0, sun_lon=200.0),
+        "Получу ли я эту работу?",
+        user_id=1,
+    )
+    assert verdict.status == validity.OK
+
+
+def test_arc_distance_wraps_around_zero() -> None:
+    # 359° и 1° — это 2°, а не 358°: иначе правила молчат ровно там, где должны срабатывать.
+    assert validity.arc_distance(359.0, 1.0) == pytest.approx(2.0)
+    assert validity.arc_distance(1.0, 359.0) == pytest.approx(2.0)
+    assert validity.gandanta_distance(359.0) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(("orb_name", "lon"), [("GANDANTA_ORB", 118.5), ("BHAVA_SANDHI_ORB", 28.5)])
+def test_orbs_come_from_constants(monkeypatch: pytest.MonkeyPatch, chart, orb_name, lon) -> None:
+    question = "Получу ли я эту работу?"
+    monkeypatch.setattr(C, "GANDANTA_ORB", 0.1)
+    monkeypatch.setattr(C, "BHAVA_SANDHI_ORB", 0.1)
+    assert validity.check(_at(chart, asc_lon=lon), question, user_id=1).status == validity.OK
+    monkeypatch.setattr(C, orb_name, 3.0)
+    assert validity.check(_at(chart, asc_lon=lon), question, user_id=1).rejected
+
+
+# --- C-04 на настоящей эфемериде ------------------------------------------- #
+
+# Под CPython 3.14 колёс pyswisseph нет, и локально в PYTHONPATH может лежать заглушка.
+# Эти тесты имеют смысл только с настоящей библиотекой — в CI она настоящая.
+real_ephemeris = pytest.mark.skipif(
+    not hasattr(swe, "version"), reason="pyswisseph подменён заглушкой"
+)
+
+TOMSK = (56.5, 84.97, "Asia/Tomsk", "Томск")
+
+
+def _chart_at(moment: datetime):
+    return build_chart(moment, *TOMSK, 10)
+
+
+@real_ephemeris
+def test_lagna_gandanta_on_a_real_moment() -> None:
+    """Ищем момент, когда лагна входит в гандānту, и проверяем правило на нём."""
+    start = datetime(2026, 9, 21, 0, 0, tzinfo=timezone.utc)
+    hit = next(
+        (
+            start + timedelta(minutes=step)
+            for step in range(0, 24 * 60, 2)
+            if validity.gandanta_distance(_chart_at(start + timedelta(minutes=step)).asc_lon)
+            <= C.GANDANTA_ORB
+        ),
+        None,
+    )
+    assert hit is not None, "за сутки лагна обязана пройти хотя бы один стык"
+    verdict = validity.check(_chart_at(hit), "Получу ли я эту работу?", user_id=1)
+    assert verdict.rejected
+    assert "гандānта" in verdict.reason
+
+
+@real_ephemeris
+def test_rejects_stay_a_minority_over_a_day() -> None:
+    """Главная защита от ложных отказов: бот, отказывающий в половине случаев, сломан.
+
+    Орб 2° из 30 даёт ~13% на бхава-сандхи плюс редкие лунные правила. Если доля
+    уходит заметно выше, условие где-то инвертировано.
+    """
+    start = datetime(2026, 9, 21, 0, 0, tzinfo=timezone.utc)
+    moments = [start + timedelta(minutes=step) for step in range(0, 24 * 60, 10)]
+    verdicts = [validity.check(_chart_at(m), "Получу ли я эту работу?", user_id=1) for m in moments]
+    share = sum(v.rejected for v in verdicts) / len(verdicts)
+    assert 0 < share < 0.30, f"доля отказов за сутки: {share:.0%}"
