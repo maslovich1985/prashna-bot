@@ -7,11 +7,13 @@ import sqlite3
 import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .config import settings
+from .constants import PLANS, TRIAL_QUESTIONS
 
 log = logging.getLogger(__name__)
 
@@ -237,6 +239,76 @@ def remaining(user_id: int, daily_limit: int) -> int:
             "SELECT count FROM usage WHERE user_id=? AND day=?", (user_id, today)
         ).fetchone()
     return max(0, daily_limit - (row["count"] if row else 0))
+
+
+# ------------------------------- права ------------------------------------ #
+
+
+@dataclass(frozen=True)
+class Entitlement:
+    """Чем именно пользователь платит за следующий вопрос (§5.1).
+
+    `source`: admin | subscription | questions | trial | none.
+    `daily_limit` = 0 — суточного потолка нет: у пакета и пробных расход
+    считается квантами `left`, а не сутками.
+    """
+
+    source: str
+    daily_limit: int = 0
+    left: int = 0
+    plan: str | None = None
+    expires_at: str | None = None
+
+    @property
+    def allowed(self) -> bool:
+        return self.source != "none"
+
+    @property
+    def unlimited(self) -> bool:
+        return self.source == "admin"
+
+
+def get_entitlement(user_id: int) -> dict[str, Any] | None:
+    with conn() as c:
+        row = c.execute("SELECT * FROM entitlements WHERE user_id = ?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def entitlement_for(user_id: int, now: datetime | None = None) -> Entitlement:
+    """Разрешение прав по приоритету §5.1: admin → подписка → пакет → пробные → отказ.
+
+    Срок подписки проверяется лениво, прямо здесь: планировщика, который гасил бы
+    истёкшие подписки, нет и не нужно.
+    """
+    if user_id in settings.admin_ids:
+        return Entitlement(source="admin")
+
+    row = get_entitlement(user_id) or {}
+    plan_key = row.get("plan")
+    plan = PLANS.get(plan_key) if plan_key else None
+    expires_at = row.get("expires_at")
+
+    if plan and plan.is_subscription and expires_at:
+        moment = now or datetime.now(timezone.utc)
+        if datetime.fromisoformat(expires_at) > moment:
+            return Entitlement(
+                source="subscription",
+                daily_limit=plan.daily_limit,
+                left=remaining(user_id, plan.daily_limit),
+                plan=plan_key,
+                expires_at=expires_at,
+            )
+
+    questions_left = int(row.get("questions_left") or 0)
+    if questions_left > 0:
+        return Entitlement(source="questions", left=questions_left, plan=plan_key)
+
+    # Пробные пожизненные, а не суточные: иначе подписка никому не нужна.
+    trial_left = TRIAL_QUESTIONS - int(row.get("trial_used") or 0)
+    if trial_left > 0:
+        return Entitlement(source="trial", left=trial_left)
+
+    return Entitlement(source="none")
 
 
 # ------------------------------- история ---------------------------------- #
