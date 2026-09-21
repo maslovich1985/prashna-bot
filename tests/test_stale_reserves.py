@@ -87,3 +87,30 @@ def test_second_run_finds_nothing() -> None:
     _age_reservation(1, db.RESERVE_TTL + 60)
     assert db.release_stale() == 1
     assert db.release_stale() == 0
+
+
+def test_recent_prashna_returns_lagna_and_window() -> None:
+    """Выборка для правила повторного вопроса: окно по времени и знак лагны."""
+    fresh = db.save_prashna(1, "Получу ли я работу?", 10, "Томск", "КАРТА", "ОТВЕТ", asc_sign=4)
+    with db.conn() as c:
+        old_at = (datetime.now(timezone.utc) - timedelta(hours=30)).isoformat()
+        c.execute(
+            "INSERT INTO prashna (user_id, asked_at, question, house, asc_sign) "
+            "VALUES (1, ?, 'Старый вопрос?', 10, 4)",
+            (old_at,),
+        )
+
+    rows = db.recent_prashna(1, hours=24)
+    assert [r["id"] for r in rows] == [fresh]
+    assert rows[0]["asc_sign"] == 4
+
+
+def test_recent_prashna_is_isolated_per_user() -> None:
+    db.save_prashna(1, "Мой вопрос?", 10, "Томск", "КАРТА", "ОТВЕТ", asc_sign=4)
+    assert db.recent_prashna(2, hours=24) == []
+
+
+def test_save_prashna_without_lagna_keeps_null() -> None:
+    # Обратная совместимость: старый вызов без asc_sign должен продолжать работать.
+    pid = db.save_prashna(1, "Вопрос?", 10, "Томск", "КАРТА", "ОТВЕТ")
+    assert db.get_prashna(1, pid)["asc_sign"] is None

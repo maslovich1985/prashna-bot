@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS prashna (
     place       TEXT,
     question    TEXT NOT NULL,
     house       INTEGER,
+    -- Знак лагны на момент вопроса: правило повторного вопроса (§5.5.1) сравнивает
+    -- его, а не текст карты. NULL у прашн, заданных до C-03.
+    asc_sign    INTEGER,
     chart_text  TEXT,
     answer      TEXT
 );
@@ -104,6 +107,13 @@ def conn() -> Iterator[sqlite3.Connection]:
         c.close()
 
 
+def _add_asc_sign_column(c: sqlite3.Connection) -> None:
+    """Та же история, что и с колонками резерва: IF NOT EXISTS тут нет."""
+    have = {r["name"] for r in c.execute("PRAGMA table_info(prashna)")}
+    if "asc_sign" not in have:
+        c.execute("ALTER TABLE prashna ADD COLUMN asc_sign INTEGER")
+
+
 def _add_reserve_columns(c: sqlite3.Connection) -> None:
     """ALTER TABLE ... ADD COLUMN не умеет IF NOT EXISTS, поэтому смотрим схему сами."""
     have = {r["name"] for r in c.execute("PRAGMA table_info(usage)")}
@@ -145,6 +155,9 @@ CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, paid_at DESC);
     # 1 → 2: открытый резерв в usage (B-06). Колонки добавляются пустыми, старый код
     # их не замечает: он писал в usage по именам, а не по SELECT *.
     _add_reserve_columns,
+    # 2 → 3: знак лагны в prashna (C-03). Старые строки остаются с NULL — правило
+    # повторного вопроса их просто не увидит, что честнее, чем угадывать лагну задним числом.
+    _add_asc_sign_column,
 ]
 
 
@@ -441,15 +454,35 @@ def release_stale(now: datetime | None = None) -> int:
 
 
 def save_prashna(
-    user_id: int, question: str, house: int, place: str, chart_text: str, answer: str
+    user_id: int,
+    question: str,
+    house: int,
+    place: str,
+    chart_text: str,
+    answer: str,
+    asc_sign: int | None = None,
 ) -> int:
     with conn() as c:
         cur = c.execute(
-            "INSERT INTO prashna (user_id, asked_at, place, question, house, chart_text, answer) "
-            "VALUES (?,?,?,?,?,?,?)",
-            (user_id, _now(), place, question, house, chart_text, answer),
+            "INSERT INTO prashna "
+            "(user_id, asked_at, place, question, house, asc_sign, chart_text, answer) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (user_id, _now(), place, question, house, asc_sign, chart_text, answer),
         )
         return int(cur.lastrowid)
+
+
+def recent_prashna(user_id: int, hours: int, now: datetime | None = None) -> list[dict[str, Any]]:
+    """Вопросы пользователя за последние `hours` — сырьё для правила повторного вопроса."""
+    moment = now or datetime.now(timezone.utc)
+    since = (moment - timedelta(hours=hours)).isoformat()
+    with conn() as c:
+        rows = c.execute(
+            "SELECT id, asked_at, question, asc_sign FROM prashna "
+            "WHERE user_id=? AND asked_at >= ? ORDER BY asked_at DESC",
+            (user_id, since),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def history(user_id: int, limit: int = 10) -> list[dict[str, Any]]:
