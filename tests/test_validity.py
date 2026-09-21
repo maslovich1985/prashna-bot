@@ -13,8 +13,10 @@ import swisseph as swe
 
 from app.astro import chart as chart_module
 from app.astro import constants as C
+from app.astro import prashna as prashna_module
 from app.astro import validity
 from app.astro.chart import Sky, build_chart
+from app.astro.prashna import judgment_factors
 
 MOMENT = datetime(2026, 9, 21, 10, 0, tzinfo=timezone.utc)
 
@@ -24,12 +26,20 @@ def chart():
     return build_chart(MOMENT, 56.5, 84.97, "Asia/Tomsk", "Томск", 10)
 
 
-def test_normal_chart_is_ok(chart) -> None:
+def test_normal_chart_is_not_rejected(chart) -> None:
+    verdict = validity.check(chart, "Получу ли я эту работу?", user_id=1)
+    assert not verdict.rejected
+    assert verdict.retry_at is None
+
+
+def test_chart_without_weaknesses_is_plain_ok(chart, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Сильная карта: ни отказа, ни оговорки. Признаки слабости считает prashna,
+    # здесь проверяется сам вердикт.
+    monkeypatch.setattr(validity, "weakness_notes", lambda _chart: [])
     verdict = validity.check(chart, "Получу ли я эту работу?", user_id=1)
     assert verdict.status == validity.OK
     assert (verdict.rejected, verdict.cautioned) == (False, False)
     assert verdict.reason == ""
-    assert verdict.retry_at is None
 
 
 def test_verdict_is_frozen() -> None:
@@ -74,7 +84,7 @@ def test_only_enabled_rules_are_listed() -> None:
         validity.moon_gandanta,
         validity.kshina_chandra,
     ]
-    assert validity.CAUTION_RULES == []
+    assert validity.CAUTION_RULES == [validity.weak_chart]
 
 
 def test_module_stays_pure() -> None:
@@ -124,7 +134,7 @@ def test_question_without_house_is_rejected(chart, question: str) -> None:
     ],
 )
 def test_clear_question_passes(chart, question: str) -> None:
-    assert validity.check(chart, question, user_id=1).status == validity.OK
+    assert not validity.check(chart, question, user_id=1).rejected
 
 
 def test_rule_uses_the_threshold_from_constants(monkeypatch: pytest.MonkeyPatch, chart) -> None:
@@ -165,26 +175,24 @@ def test_different_question_passes(chart) -> None:
     verdict = validity.check(
         chart, "Вернёт ли он долг до конца месяца?", user_id=1, history=history
     )
-    assert verdict.status == validity.OK
+    assert not verdict.rejected
 
 
 def test_same_question_other_lagna_passes(chart) -> None:
     # Лагна сменилась — карта отвечает уже не то же самое.
     history = [_past(chart, "Получу ли я эту работу?", asc_sign=(chart.asc_sign + 1) % 12)]
     verdict = validity.check(chart, "Получу ли я эту работу?", user_id=1, history=history)
-    assert verdict.status == validity.OK
+    assert not verdict.rejected
 
 
 def test_old_prashna_without_lagna_is_skipped(chart) -> None:
     # Прашны до C-03 хранятся без asc_sign: лучше не проверить, чем угадать.
     history = [_past(chart, "Получу ли я эту работу?", asc_sign=None)]
-    assert validity.check(chart, "Получу ли я эту работу?", user_id=1, history=history).status == (
-        validity.OK
-    )
+    assert not validity.check(chart, "Получу ли я эту работу?", user_id=1, history=history).rejected
 
 
 def test_empty_history_means_no_check(chart) -> None:
-    assert validity.check(chart, "Получу ли я эту работу?", user_id=1).status == validity.OK
+    assert not validity.check(chart, "Получу ли я эту работу?", user_id=1).rejected
 
 
 @pytest.mark.parametrize(
@@ -239,9 +247,10 @@ def test_lagna_in_gandanta_is_rejected(chart, lon: float) -> None:
 
 @pytest.mark.parametrize("lon", [15.0, 105.0, 135.0, 225.0, 315.0])
 def test_lagna_away_from_junctions_passes(chart, lon: float) -> None:
-    assert validity.check(_at(chart, asc_lon=lon), "Получу ли я эту работу?", user_id=1).status == (
-        validity.OK
-    )
+    # Отказа нет; caution по слабости карты правило гандānты не касается.
+    assert not validity.check(
+        _at(chart, asc_lon=lon), "Получу ли я эту работу?", user_id=1
+    ).rejected
 
 
 @pytest.mark.parametrize("lon", [29.5, 30.0, 31.5, 59.0, 271.0])
@@ -281,7 +290,7 @@ def test_moon_far_from_sun_passes(chart) -> None:
         "Получу ли я эту работу?",
         user_id=1,
     )
-    assert verdict.status == validity.OK
+    assert not verdict.rejected
 
 
 def test_arc_distance_wraps_around_zero() -> None:
@@ -296,7 +305,7 @@ def test_orbs_come_from_constants(monkeypatch: pytest.MonkeyPatch, chart, orb_na
     question = "Получу ли я эту работу?"
     monkeypatch.setattr(C, "GANDANTA_ORB", 0.1)
     monkeypatch.setattr(C, "BHAVA_SANDHI_ORB", 0.1)
-    assert validity.check(_at(chart, asc_lon=lon), question, user_id=1).status == validity.OK
+    assert not validity.check(_at(chart, asc_lon=lon), question, user_id=1).rejected
     monkeypatch.setattr(C, orb_name, 3.0)
     assert validity.check(_at(chart, asc_lon=lon), question, user_id=1).rejected
 
@@ -408,7 +417,7 @@ def test_retry_moment_really_passes_the_check(chart) -> None:
     )
     sky = sky_at(verdict.retry_at)
     future = _at(chart, asc_lon=sky.asc_lon, moon_lon=sky.moon_lon, sun_lon=sky.sun_lon)
-    assert validity.check(future, "Получу ли я эту работу?", user_id=1).status == validity.OK
+    assert not validity.check(future, "Получу ли я эту работу?", user_id=1).rejected
 
 
 @pytest.mark.parametrize(
@@ -468,3 +477,55 @@ def test_retry_moment_on_a_real_sky() -> None:
     assert validity.check(_chart_at(found), "Получу ли я эту работу?", user_id=1).status == (
         validity.OK
     )
+
+
+# --- C-05: caution на слабой карте ----------------------------------------- #
+
+
+def _weak(chart, *, moon_house=None, combust=False, retro=False):
+    planets = dict(chart.planets)
+    moon = planets["Луна"]
+    planets["Луна"] = dataclasses.replace(moon, house=moon_house or moon.house)
+    lord_name = prashna_module.lagna_lord_of(chart).name
+    planets[lord_name] = dataclasses.replace(planets[lord_name], combust=combust, retro=retro)
+    return dataclasses.replace(chart, planets=planets)
+
+
+def test_moon_in_dusthana_gives_caution(chart) -> None:
+    weak = _weak(_at(chart, asc_lon=75.0), moon_house=8)
+    verdict = validity.check(weak, "Получу ли я эту работу?", user_id=1)
+    assert verdict.cautioned
+    assert "8-м доме" in verdict.reason
+
+
+def test_combust_lagna_lord_gives_caution(chart) -> None:
+    weak = _weak(_at(chart, asc_lon=75.0), moon_house=5, combust=True)
+    verdict = validity.check(weak, "Получу ли я эту работу?", user_id=1)
+    assert verdict.cautioned
+    assert "сожжён" in verdict.reason
+
+
+def test_retrograde_lagna_lord_gives_caution(chart) -> None:
+    weak = _weak(_at(chart, asc_lon=75.0), moon_house=5, retro=True)
+    assert validity.check(weak, "Получу ли я эту работу?", user_id=1).cautioned
+
+
+def test_caution_never_wins_over_reject(chart) -> None:
+    # Отказ дороже оговорки: непригодная карта не должна уходить в толкование.
+    weak = _weak(_at(chart, asc_lon=0.0), moon_house=8, combust=True)
+    verdict = validity.check(weak, "Получу ли я эту работу?", user_id=1)
+    assert verdict.rejected and not verdict.cautioned
+
+
+def test_caution_reuses_judgment_calculation(chart) -> None:
+    """Оговорки считаются тем же кодом, что и факторы суждения, а не копией правил."""
+    weak = _weak(_at(chart, asc_lon=75.0), moon_house=8)
+    notes = prashna_module.weakness_notes(weak)
+    assert notes
+    assert validity.check(weak, "Получу ли я эту работу?", user_id=1).reason == " ".join(notes)
+
+
+def test_connection_kind_matches_the_sentence(chart) -> None:
+    kind = prashna_module.connection_kind(chart)
+    assert kind in prashna_module.CONNECTION_SENTENCES
+    assert prashna_module.CONNECTION_SENTENCES[kind] in judgment_factors(chart)

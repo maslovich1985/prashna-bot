@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 
 from . import constants as C
 from .chart import PrashnaChart, Sky
-from .prashna import detect_house_scored
+from .prashna import detect_house_scored, weakness_notes
 
 NO_CLEAR_HOUSE_REASON = (
     "По формулировке не видно, о какой области жизни вопрос, — "
@@ -181,6 +181,18 @@ def geometry_reason(sky: Sky) -> str:
     return ""
 
 
+def weak_chart(chart: PrashnaChart, _question: str) -> Verdict:
+    """Карта читается, но слабая: толкование выдаём с оговоркой и квант списываем.
+
+    Признаки берём из `prashna.weakness_notes` — того же расчёта, на котором
+    строятся факторы суждения, а не отдельной копии правил.
+    """
+    notes = weakness_notes(chart)
+    if notes:
+        return Verdict(status=CAUTION, reason=" ".join(notes))
+    return Verdict()
+
+
 # Причины, которые уходят со временем: лагна и Луна движутся. Для «нет ясного дома»
 # и повторного вопроса срок бессмыслен — там помогает переформулировка или /chart.
 GEOMETRY_REASONS = frozenset(
@@ -241,7 +253,7 @@ REJECT_RULES: list[Rule] = [
     moon_gandanta,
     kshina_chandra,
 ]
-CAUTION_RULES: list[Rule] = []
+CAUTION_RULES: list[Rule] = [weak_chart]
 
 
 def check(

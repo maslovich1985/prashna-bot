@@ -210,6 +210,9 @@ async def _answer(msg: Message, question: str, place: Place) -> bool:
             await msg.answer(chunk)
         if answer.truncated:
             await msg.answer(texts.ANSWER_TRUNCATED)
+        if verdict.cautioned:
+            # Карта слабая, но читаемая: толкование выдано, квант списывается (§5.5).
+            await msg.answer(texts.answer_caution(verdict.reason))
     except TelegramAPIError:
         log.exception("Telegram не принял толкование прашны %d", pid)
         with suppress(TelegramAPIError):
