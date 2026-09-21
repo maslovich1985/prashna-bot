@@ -29,6 +29,11 @@ async def help_cmd(msg: Message) -> None:
     await msg.answer(texts.WELCOME)
 
 
+@router.message(Command("privacy"))
+async def privacy(msg: Message) -> None:
+    await msg.answer(texts.PRIVACY)
+
+
 @router.message(Command("cancel"))
 async def cancel(msg: Message, state: FSMContext) -> None:
     await state.clear()
