@@ -14,6 +14,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Location
 
 from app import db, geo, llm, texts
+from app.astro import constants as C
 from app.astro import validity
 from app.config import settings
 from app.handlers import basic
@@ -384,3 +385,55 @@ async def test_answered_prashna_stores_lagna(feed, monkeypatch: pytest.MonkeyPat
     # Лагна нужна правилу повторного вопроса (C-03).
     assert row["asc_sign"] is not None
     assert row["reject_reason"] is None
+
+
+# --- C-08: антиабьюз отказов ----------------------------------------------- #
+
+
+async def test_reject_is_counted(feed, monkeypatch: pytest.MonkeyPatch, no_network) -> None:
+    monkeypatch.setattr(
+        prashna_handlers,
+        "_validity_of",
+        lambda *a, **kw: validity.Verdict(
+            status=validity.REJECT, reason=validity.LAGNA_GANDANTA_REASON
+        ),
+    )
+    await feed("Получу ли я эту работу в этом году?")
+    assert db.rejects_today(USER_ID) == 1
+
+
+async def test_unclear_question_is_counted_too(feed, no_network) -> None:
+    # Бессмысленный текст карту не считает, но и бесплатным циклом быть не должен.
+    await feed("ну что там вообще, интересно")
+    assert db.rejects_today(USER_ID) == 1
+
+
+async def test_reject_cap_stops_before_any_calculation(
+    feed, monkeypatch: pytest.MonkeyPatch, no_network
+) -> None:
+    """DoD: превышен лимит → ни расчёта карты, ни резерва."""
+    built: list[int] = []
+    monkeypatch.setattr(prashna_handlers, "build_chart", lambda *a, **kw: built.append(1))
+    reserved: list[int] = []
+    monkeypatch.setattr(db, "reserve", lambda *a, **kw: reserved.append(1) or (None, ""))
+
+    for _ in range(C.MAX_REJECTS_PER_DAY):
+        db.note_reject(USER_ID)
+    before = db.entitlement_for(USER_ID).left
+
+    sent = await feed("Получу ли я эту работу в этом году?")
+
+    assert [s.text for s in sent if s.text] == [texts.TOO_MANY_REJECTS]
+    assert built == [] and reserved == []
+    assert db.entitlement_for(USER_ID).left == before
+
+
+async def test_admin_is_not_capped(feed, monkeypatch: pytest.MonkeyPatch, no_network) -> None:
+    monkeypatch.setattr(
+        prashna_handlers, "settings", dataclasses.replace(settings, admin_ids=(USER_ID,))
+    )
+    for _ in range(C.MAX_REJECTS_PER_DAY + 5):
+        db.note_reject(USER_ID)
+
+    sent = await feed("ну что там вообще, интересно")
+    assert texts.TOO_MANY_REJECTS not in [s.text for s in sent if s.text]

@@ -61,10 +61,19 @@ async def prashna(msg: Message, state: FSMContext) -> None:
         await msg.answer(texts.QUESTION_TOO_LONG)
         return
 
+    # Отказ не списывает квант, но считает карту — это CPU. Потолок проверяем
+    # раньше всего: превышен — не считаем ничего (§5.5.3).
+    is_admin = msg.from_user.id in settings.admin_ids
+    if not is_admin and db.rejects_today(msg.from_user.id) >= C.MAX_REJECTS_PER_DAY:
+        await msg.answer(texts.TOO_MANY_REJECTS)
+        return
+
     # Вопрос без ясного дома виден по одному тексту: отказываем до резерва и до
     # расчёта карты — ни кванта, ни CPU (§5.5.1, правило 1).
     house_verdict = validity.check_question(question)
     if house_verdict.rejected:
+        if not is_admin:
+            db.note_reject(msg.from_user.id)
         await msg.answer(texts.prashna_rejected(house_verdict.reason, None))
         return
 
@@ -165,6 +174,8 @@ async def _answer(msg: Message, question: str, place: Place) -> bool:
             asc_sign=chart.asc_sign,
             reject_reason=verdict.reason,
         )
+        if msg.from_user.id not in settings.admin_ids:
+            db.note_reject(msg.from_user.id)
         await msg.answer(texts.prashna_rejected(verdict.reason, retry_local))
         # LLM не зовём, квант вернётся в finally: отказ не должен стоить вопроса.
         return False

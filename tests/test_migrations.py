@@ -131,3 +131,13 @@ def test_asc_sign_step_is_idempotent() -> None:
         db._add_asc_sign_column(c)
 
     assert "asc_sign" in _columns("prashna")
+
+
+def test_rejects_column_step_is_idempotent() -> None:
+    with db.conn() as c:
+        c.execute("ALTER TABLE usage DROP COLUMN rejects")
+        assert "rejects" not in _columns("usage")
+        db._add_rejects_column(c)
+        db._add_rejects_column(c)
+
+    assert "rejects" in _columns("usage")
