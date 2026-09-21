@@ -49,7 +49,7 @@ def test_active_subscription() -> None:
 
 def test_subscription_left_follows_usage() -> None:
     _seed(1, plan="month", expires_at=_iso(10))
-    db.check_and_bump(1, daily_limit=10, cooldown=0)
+    db.reserve(1, cooldown=0)
     assert db.entitlement_for(1).left == 9
 
 

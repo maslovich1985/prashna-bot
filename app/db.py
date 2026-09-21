@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import texts
 from .config import settings
 from .constants import PLANS, TRIAL_QUESTIONS
 
@@ -205,33 +206,6 @@ def upsert_user(user_id: int, username: str | None = None, **fields: Any) -> Non
 # -------------------------------- лимиты ---------------------------------- #
 
 
-def check_and_bump(user_id: int, daily_limit: int, cooldown: int) -> tuple[bool, str]:
-    """Возвращает (разрешено, причина отказа)."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    now = datetime.now(timezone.utc)
-    with conn() as c:
-        row = c.execute(
-            "SELECT count, last_at FROM usage WHERE user_id=? AND day=?", (user_id, today)
-        ).fetchone()
-        count = row["count"] if row else 0
-        if row and row["last_at"]:
-            delta = (now - datetime.fromisoformat(row["last_at"])).total_seconds()
-            if delta < cooldown:
-                return False, f"Подождите ещё {int(cooldown - delta)} с перед следующим вопросом."
-        if count >= daily_limit:
-            return False, (
-                f"Дневной лимит исчерпан ({daily_limit} прашн в сутки). "
-                "Прашна требует искреннего, вызревшего вопроса — вернитесь завтра."
-            )
-        c.execute(
-            "INSERT INTO usage (user_id, day, count, last_at) VALUES (?,?,1,?) "
-            "ON CONFLICT(user_id, day) DO UPDATE SET "
-            "count = usage.count + 1, last_at = excluded.last_at",
-            (user_id, today, now.isoformat()),
-        )
-    return True, ""
-
-
 def remaining(user_id: int, daily_limit: int) -> int:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with conn() as c:
@@ -309,6 +283,97 @@ def entitlement_for(user_id: int, now: datetime | None = None) -> Entitlement:
         return Entitlement(source="trial", left=trial_left)
 
     return Entitlement(source="none")
+
+
+# ------------------------- резерв кванта вопроса --------------------------- #
+
+
+@dataclass(frozen=True)
+class Reservation:
+    """Квант, списанный под один вопрос. Возвращается `release`, закрепляется `commit`."""
+
+    user_id: int
+    source: str
+    day: str | None = None
+
+
+def _today() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def reserve(user_id: int, cooldown: int) -> tuple[Reservation | None, str]:
+    """Проверяет право и списывает квант авансом. Возвращает (резерв, причина отказа).
+
+    Списываем до ответа, а не после: иначе параллельные вопросы обходят лимит.
+    Вернуть квант — задача `release`.
+    """
+    ent = entitlement_for(user_id)
+    if ent.source == "admin":
+        return Reservation(user_id=user_id, source="admin"), ""
+    if not ent.allowed:
+        return None, texts.NO_ENTITLEMENT
+
+    day = _today()
+    now = datetime.now(timezone.utc)
+    with conn() as c:
+        row = c.execute(
+            "SELECT count, last_at FROM usage WHERE user_id=? AND day=?", (user_id, day)
+        ).fetchone()
+        if row and row["last_at"]:
+            delta = (now - datetime.fromisoformat(row["last_at"])).total_seconds()
+            if delta < cooldown:
+                return None, texts.cooldown_wait(int(cooldown - delta))
+        # Суточный потолок есть только у подписки: пакет и пробные считаются квантами.
+        if ent.source == "subscription" and (row["count"] if row else 0) >= ent.daily_limit:
+            return None, texts.daily_limit_reached(ent.daily_limit)
+
+        c.execute(
+            "INSERT INTO usage (user_id, day, count, last_at) VALUES (?,?,1,?) "
+            "ON CONFLICT(user_id, day) DO UPDATE SET "
+            "count = usage.count + 1, last_at = excluded.last_at",
+            (user_id, day, now.isoformat()),
+        )
+        if ent.source == "questions":
+            c.execute(
+                "UPDATE entitlements SET questions_left = questions_left - 1, updated_at = ? "
+                "WHERE user_id = ? AND questions_left > 0",
+                (_now(), user_id),
+            )
+        elif ent.source == "trial":
+            c.execute(
+                "INSERT INTO entitlements (user_id, trial_used, updated_at) VALUES (?,1,?) "
+                "ON CONFLICT(user_id) DO UPDATE SET "
+                "trial_used = entitlements.trial_used + 1, updated_at = excluded.updated_at",
+                (user_id, _now()),
+            )
+    return Reservation(user_id=user_id, source=ent.source, day=day), ""
+
+
+def commit(res: Reservation) -> None:
+    """Закрепляет резерв. Квант уже списан в `reserve`, отдельной записи не нужно."""
+
+
+def release(res: Reservation) -> None:
+    """Возвращает неиспользованный квант. Идемпотентности не требуется: вызов один."""
+    if res.source == "admin":
+        return
+    with conn() as c:
+        c.execute(
+            "UPDATE usage SET count = MAX(count - 1, 0) WHERE user_id=? AND day=?",
+            (res.user_id, res.day),
+        )
+        if res.source == "questions":
+            c.execute(
+                "UPDATE entitlements SET questions_left = questions_left + 1, updated_at = ? "
+                "WHERE user_id = ?",
+                (_now(), res.user_id),
+            )
+        elif res.source == "trial":
+            c.execute(
+                "UPDATE entitlements SET trial_used = MAX(trial_used - 1, 0), updated_at = ? "
+                "WHERE user_id = ?",
+                (_now(), res.user_id),
+            )
 
 
 # ------------------------------- история ---------------------------------- #

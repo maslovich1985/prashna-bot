@@ -232,7 +232,7 @@ DDL из §5.3 через `MIGRATIONS`. `charge_id` как PRIMARY KEY — эт�
 Хэндлеры пока ходят в `check_and_bump` с `settings.daily_limit` — подмена прашна-пути на
 `reserve`/`commit` идёт в B-04, здесь только разрешение прав.
 
-### B-04 · `reserve` / `commit` / `release` — M
+### ✅ B-04 · `reserve` / `commit` / `release` — M
 
 Заменить `check_and_bump` в прашна-пути. `try/finally` с флагом `committed` — не `except`
 по списку типов: неучтённое исключение тоже обязано вернуть квант.
@@ -240,6 +240,21 @@ DDL из §5.3 через `MIGRATIONS`. `charge_id` как PRIMARY KEY — эт�
 **Файлы:** `app/db.py`, `app/handlers/prashna.py`.
 **DoD:** падение `llm.interpret` → `remaining()` не изменился (тест).
 **Зависит:** B-03
+
+`db.reserve(user_id, cooldown)` → `(Reservation | None, причина отказа)`, `db.commit(res)`,
+`db.release(res)`. Списание авансом: параллельные вопросы иначе обходят лимит. `release`
+возвращает и суточный счётчик, и квант тарифа (`questions_left` / `trial_used`), у админа —
+no-op. `commit` намеренно пустой: квант уже списан в `reserve`, тело появится в B-06 вместе
+с `reserved_at`.
+
+В хэндлере прашна-путь разбит: `prashna` держит резерв и `try/finally` с флагом `committed`,
+`_answer` возвращает `True` только на доставленном толковании. Геоданные берутся **до**
+`reserve` (§5.4.1). `check_and_bump` удалён — его больше никто не звал; `tests/test_limits.py`
+проверяет тот же лимит и кулдаун через `reserve`. `/me` и подвал ответа считают остаток из
+`entitlement_for`, а не из `settings.daily_limit`.
+
+Таблица §5.4.1 разобрана не целиком: разделение 5xx / 429 / 401/403 / таймаута и порог
+`MIN_ANSWER_LEN` — в B-05, возврат висящих резервов после рестарта — в B-06.
 
 ### B-05 · Таблица сбоев §5.4.1 — M
 

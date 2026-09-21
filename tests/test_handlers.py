@@ -162,11 +162,41 @@ async def test_prashna_keeps_chart_when_llm_fails(feed, monkeypatch: pytest.Monk
         raise llm.LLMError("Groq недоступен")
 
     monkeypatch.setattr(prashna_handlers.llm, "interpret", failing)
+    before = db.entitlement_for(USER_ID).left
     sent = await feed("Получу ли я эту работу в этом году?")
     texts_sent = [s.text for s in sent if s.text]
     assert "Прашна принята" in texts_sent[0]
     assert texts_sent[-1] == texts.LLM_UNAVAILABLE
     assert db.history(USER_ID, 10) == []
+    # Толкование не дошло — квант возвращён (§5.4.1).
+    assert db.entitlement_for(USER_ID).left == before
+
+
+async def test_prashna_refunds_quantum_on_unexpected_error(
+    feed, monkeypatch: pytest.MonkeyPatch, no_network
+) -> None:
+    # Не LLMError и не сбой карты: неучтённое исключение обязано вернуть квант так же.
+    async def boom(*args: Any, **kwargs: Any) -> bool:
+        raise RuntimeError("неучтённый сбой")
+
+    monkeypatch.setattr(prashna_handlers, "_answer", boom)
+    before = db.entitlement_for(USER_ID).left
+    with pytest.raises(RuntimeError):
+        await feed("Получу ли я эту работу в этом году?")
+    assert db.entitlement_for(USER_ID).left == before
+
+
+async def test_prashna_refunds_quantum_when_chart_fails(
+    feed, monkeypatch: pytest.MonkeyPatch, no_network
+) -> None:
+    def boom(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("расчёт упал")
+
+    monkeypatch.setattr(prashna_handlers, "build_chart", boom)
+    before = db.entitlement_for(USER_ID).left
+    sent = await feed("Получу ли я эту работу в этом году?")
+    assert [s.text for s in sent if s.text] == [texts.CHART_FAILED]
+    assert db.entitlement_for(USER_ID).left == before
 
 
 async def test_chart_command_returns_saved_prashna(feed, no_network) -> None:
