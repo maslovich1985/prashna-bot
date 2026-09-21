@@ -13,6 +13,7 @@ EXPECTED_ORDER = [
     # basic
     "start",
     "help_cmd",
+    "privacy",
     "cancel",
     "me",
     "history",

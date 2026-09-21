@@ -13,6 +13,7 @@ import pytest
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Location
 
+from app import bot as bot_module
 from app import db, geo, llm, texts
 from app.astro import constants as C
 from app.astro import validity
@@ -471,3 +472,41 @@ async def test_no_caution_note_on_a_clean_chart(feed, monkeypatch: pytest.Monkey
     monkeypatch.setattr(prashna_handlers.llm, "interpret", answered)
     sent = await feed("Получу ли я эту работу в этом году?")
     assert not any("Карта слабая" in (s.text or "") for s in sent)
+
+
+# --- E-01: /privacy -------------------------------------------------------- #
+
+
+async def test_privacy_command_answers(feed, no_network) -> None:
+    sent = await feed("/privacy")
+    assert sent[-1].text == texts.PRIVACY
+
+
+def test_privacy_names_groq_and_proxy() -> None:
+    """Текст вопроса уходит наружу — это должно быть сказано прямо, а не общими словами."""
+    assert "Groq" in texts.PRIVACY
+    assert "прокси" in texts.PRIVACY
+
+
+def test_privacy_covers_what_is_stored() -> None:
+    for item in ("вопрос", "карт", "координаты", "часовой пояс"):
+        assert item in texts.PRIVACY.lower() or item in texts.PRIVACY
+
+
+def test_privacy_explains_the_tombstone() -> None:
+    # Надгробие из E-03: часть записи переживает удаление, и об этом нужно сказать.
+    assert "/delete_me" in texts.PRIVACY
+    assert "пробны" in texts.PRIVACY
+
+
+def test_privacy_mentions_backups_retention() -> None:
+    assert "14 дней" in texts.PRIVACY
+
+
+def test_privacy_is_in_help_and_menu() -> None:
+    assert "/privacy" in texts.WELCOME
+    assert "privacy" in [c.command for c in bot_module.BOT_COMMANDS]
+
+
+def test_privacy_fits_one_telegram_message() -> None:
+    assert len(texts.PRIVACY) <= 4096
