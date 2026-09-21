@@ -474,9 +474,10 @@ def test_retry_moment_on_a_real_sky() -> None:
 
     found = validity.find_retry_moment(blocked, lambda m: chart_module.sky_at(m, 56.5, 84.97))
     assert found is not None and found > blocked
-    assert validity.check(_chart_at(found), "Получу ли я эту работу?", user_id=1).status == (
-        validity.OK
-    )
+    # Геометрия в найденный момент чиста; caution по слабости карты перебор не лечит
+    # и лечить не должен — она не уходит со временем в пределах трёх часов.
+    assert not validity.check(_chart_at(found), "Получу ли я эту работу?", user_id=1).rejected
+    assert not validity.geometry_reason(chart_module.sky_at(found, 56.5, 84.97))
 
 
 # --- C-05: caution на слабой карте ----------------------------------------- #
