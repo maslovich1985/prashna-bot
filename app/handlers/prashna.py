@@ -6,10 +6,12 @@ import asyncio
 import html
 import logging
 from collections.abc import Iterator
+from contextlib import suppress
 from datetime import datetime, timezone
 
 from aiogram import F, Router
 from aiogram.enums import ChatAction
+from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
@@ -23,6 +25,13 @@ from .common import place_for
 
 log = logging.getLogger(__name__)
 router = Router(name="prashna")
+
+# Таблица §5.4.1: что показать пользователю на каждый вид сбоя толкования.
+LLM_FAILURE_TEXTS = {
+    llm.LLMRateLimited: texts.LLM_RATE_LIMITED,
+    llm.LLMTimeout: texts.LLM_TIMEOUT,
+    llm.LLMEmptyAnswer: texts.LLM_EMPTY,
+}
 
 MIN_QUESTION_LEN = 8
 MAX_QUESTION_LEN = 500
@@ -114,14 +123,28 @@ async def _answer(msg: Message, question: str, place: Place) -> bool:
     try:
         answer = await llm.interpret(question, house, C.HOUSE_MEANINGS[house], chart_text, factors)
     except llm.LLMError as e:
-        log.error("LLM: %s", e)
-        await msg.answer(texts.LLM_UNAVAILABLE)
+        # Ни одна ветка не списывает вопрос: толкования не было (§5.4.1).
+        if isinstance(e, llm.LLMAuthError):
+            # Ключ протух или кончился биллинг — сервис стоит целиком, это не «попробуйте позже».
+            log.error("Groq отверг ключ: %s", e)
+        else:
+            log.error("LLM: %s", e)
+        await msg.answer(LLM_FAILURE_TEXTS.get(type(e), texts.LLM_UNAVAILABLE))
         return False
 
-    pid = db.save_prashna(msg.from_user.id, question, house, place.name, chart_text, answer)
+    pid = db.save_prashna(msg.from_user.id, question, house, place.name, chart_text, answer.text)
 
-    for chunk in chunks(html.escape(answer), CHUNK):
-        await msg.answer(chunk)
+    # Сохранили до отправки: не принял Telegram — толкование не потеряно, лежит в /chart.
+    try:
+        for chunk in chunks(html.escape(answer.text), CHUNK):
+            await msg.answer(chunk)
+        if answer.truncated:
+            await msg.answer(texts.ANSWER_TRUNCATED)
+    except TelegramAPIError:
+        log.exception("Telegram не принял толкование прашны %d", pid)
+        with suppress(TelegramAPIError):
+            await msg.answer(texts.delivery_failed(pid))
+        return False
     ent = db.entitlement_for(msg.from_user.id)
     left_txt = texts.UNLIMITED_PLAIN if ent.unlimited else str(ent.left)
     await msg.answer(texts.prashna_footer(pid, left_txt))

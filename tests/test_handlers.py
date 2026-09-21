@@ -9,6 +9,7 @@ import dataclasses
 from typing import Any
 
 import pytest
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Location
 
 from app import db, geo, llm, texts
@@ -137,9 +138,9 @@ async def test_prashna_sends_chart_before_llm_answer(
 ) -> None:
     seen_before_llm: list[str] = []
 
-    async def fake_interpret(*args: Any, **kwargs: Any) -> str:
+    async def fake_interpret(*args: Any, **kwargs: Any) -> llm.Answer:
         seen_before_llm.extend(session.texts)
-        return "Ответ LLM: да."
+        return llm.Answer(text="Ответ LLM: да.")
 
     monkeypatch.setattr(prashna_handlers.llm, "interpret", fake_interpret)
 
@@ -217,3 +218,67 @@ async def test_forget_clears_history(feed, no_network) -> None:
     sent = await feed("/forget")
     assert sent[-1].text == texts.forgotten(1)
     assert db.history(USER_ID, 10) == []
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (llm.LLMUnavailable("прокси лёг"), texts.LLM_UNAVAILABLE),
+        (llm.LLMRateLimited("429"), texts.LLM_RATE_LIMITED),
+        (llm.LLMAuthError("401"), texts.LLM_UNAVAILABLE),
+        (llm.LLMTimeout("не дождались"), texts.LLM_TIMEOUT),
+        (llm.LLMEmptyAnswer("пусто"), texts.LLM_EMPTY),
+    ],
+)
+async def test_llm_failures_are_explained_and_not_charged(
+    error: llm.LLMError, expected: str, feed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def failing(*args: Any, **kwargs: Any) -> llm.Answer:
+        raise error
+
+    monkeypatch.setattr(prashna_handlers.llm, "interpret", failing)
+    before = db.entitlement_for(USER_ID).left
+    sent = await feed("Получу ли я эту работу в этом году?")
+    assert [s.text for s in sent if s.text][-1] == expected
+    assert db.entitlement_for(USER_ID).left == before
+    assert db.history(USER_ID, 10) == []
+
+
+async def test_truncated_answer_is_delivered_marked_and_charged(
+    feed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def truncated(*args: Any, **kwargs: Any) -> llm.Answer:
+        return llm.Answer(text="Вердикт: да. Обоснование обрывается на полу", truncated=True)
+
+    monkeypatch.setattr(prashna_handlers.llm, "interpret", truncated)
+    before = db.entitlement_for(USER_ID).left
+    sent = await feed("Получу ли я эту работу в этом году?")
+    texts_sent = [s.text for s in sent if s.text]
+    assert texts.ANSWER_TRUNCATED in texts_sent
+    # Толкование доставлено, пусть и сокращённое, — вопрос списан (§5.4.1).
+    assert db.entitlement_for(USER_ID).left == before - 1
+
+
+async def test_telegram_refusal_keeps_answer_and_refunds(
+    feed, session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def answered(*args: Any, **kwargs: Any) -> llm.Answer:
+        return llm.Answer(text="Вердикт: да. " + "Обоснование. " * 20)
+
+    monkeypatch.setattr(prashna_handlers.llm, "interpret", answered)
+    before = db.entitlement_for(USER_ID).left
+
+    real_request = session.make_request
+
+    async def flaky(bot: Any, method: Any, timeout: Any = None) -> Any:  # noqa: ASYNC109
+        # Карта проходит, само толкование Telegram не принимает.
+        if "Вердикт" in (getattr(method, "text", "") or ""):
+            raise TelegramBadRequest(method=method, message="message is too long")
+        return await real_request(bot, method, timeout)
+
+    monkeypatch.setattr(session, "make_request", flaky)
+    await feed("Получу ли я эту работу в этом году?")
+    assert any("/chart" in t and "не списан" in t for t in session.texts)
+    assert db.entitlement_for(USER_ID).left == before
+    # Толкование сохранено до отправки: его можно забрать командой /chart.
+    assert len(db.history(USER_ID, 10)) == 1
