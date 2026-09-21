@@ -122,3 +122,85 @@ def test_rule_uses_the_threshold_from_constants(monkeypatch: pytest.MonkeyPatch,
     # Порог крутится правкой таблицы: подняли выше любого балла — отказ на всём.
     monkeypatch.setattr(C, "HOUSE_MIN_SCORE", 10_000)
     assert validity.check(chart, "Получу ли я оффер на новую работу?", user_id=1).rejected
+
+
+# --- C-03: повторный вопрос ------------------------------------------------ #
+
+
+SAME_LAGNA = object()  # отличает «ту же лагну» от честного None у старых прашн
+
+
+def _past(chart, question: str, pid: int = 7, asc_sign=SAME_LAGNA):
+    return validity.PastAsk(
+        pid=pid, question=question, asc_sign=chart.asc_sign if asc_sign is SAME_LAGNA else asc_sign
+    )
+
+
+def test_same_question_same_lagna_is_rejected(chart) -> None:
+    history = [_past(chart, "Получу ли я эту работу?")]
+    verdict = validity.check(chart, "получу ли я эту работу", user_id=1, history=history)
+    assert verdict.rejected
+    assert "/chart 7" in verdict.reason
+    # Срока нет: ответ уже дан, ждать нечего — есть ссылка на прежнее толкование.
+    assert verdict.retry_at is None
+
+
+def test_reformulated_question_is_still_a_repeat(chart) -> None:
+    history = [_past(chart, "Получу ли я эту работу?")]
+    verdict = validity.check(chart, "Получу ли я эту работу!!!", user_id=1, history=history)
+    assert verdict.rejected
+
+
+def test_different_question_passes(chart) -> None:
+    history = [_past(chart, "Получу ли я эту работу?")]
+    verdict = validity.check(
+        chart, "Вернёт ли он долг до конца месяца?", user_id=1, history=history
+    )
+    assert verdict.status == validity.OK
+
+
+def test_same_question_other_lagna_passes(chart) -> None:
+    # Лагна сменилась — карта отвечает уже не то же самое.
+    history = [_past(chart, "Получу ли я эту работу?", asc_sign=(chart.asc_sign + 1) % 12)]
+    verdict = validity.check(chart, "Получу ли я эту работу?", user_id=1, history=history)
+    assert verdict.status == validity.OK
+
+
+def test_old_prashna_without_lagna_is_skipped(chart) -> None:
+    # Прашны до C-03 хранятся без asc_sign: лучше не проверить, чем угадать.
+    history = [_past(chart, "Получу ли я эту работу?", asc_sign=None)]
+    assert validity.check(chart, "Получу ли я эту работу?", user_id=1, history=history).status == (
+        validity.OK
+    )
+
+
+def test_empty_history_means_no_check(chart) -> None:
+    assert validity.check(chart, "Получу ли я эту работу?", user_id=1).status == validity.OK
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        ("Получу ли я эту работу?", "получу ли я эту работу"),
+        ("Вернёт ли он долг?", "Вернет ли он долг"),
+        ("Стоит ли переезжать?", "  стоит   ли   переезжать!!!  "),
+    ],
+)
+def test_normalization_ignores_case_yo_and_punctuation(a: str, b: str) -> None:
+    assert validity.normalize(a) == validity.normalize(b)
+    assert validity.similarity(a, b) == 1.0
+
+
+def test_similarity_threshold_comes_from_constants(monkeypatch: pytest.MonkeyPatch, chart) -> None:
+    history = [_past(chart, "Получу ли я эту работу?")]
+    monkeypatch.setattr(C, "REPEAT_SIMILARITY", 0.01)
+    assert validity.check(
+        chart, "Совсем другой вопрос о долге", user_id=1, history=history
+    ).rejected
+
+
+def test_repeat_wins_over_other_rules(chart) -> None:
+    # Повтор проверяется первым: это дешевле любого астрологического правила.
+    history = [_past(chart, "ну что там вообще")]
+    verdict = validity.check(chart, "ну что там вообще", user_id=1, history=history)
+    assert "/chart 7" in verdict.reason

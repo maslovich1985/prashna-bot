@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import difflib
+import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -21,6 +23,15 @@ NO_CLEAR_HOUSE_REASON = (
     "Спросите об одном конкретном деле: «получу ли я эту работу», "
     "«вернёт ли он долг», «стоит ли переезжать в эту квартиру»."
 )
+
+
+def repeat_reason(pid: int) -> str:
+    return (
+        "Этот вопрос вы уже задавали, и карта с тех пор почти не изменилась. "
+        "Прашна отвечает на вопрос один раз: перебор формулировок ради другого ответа "
+        f"ломает саму логику метода. Прежнее толкование: /chart {pid}"
+    )
+
 
 OK = "ok"
 CAUTION = "caution"
@@ -63,6 +74,46 @@ def no_clear_house(_chart: PrashnaChart, question: str) -> Verdict:
     return Verdict(status=REJECT, reason=NO_CLEAR_HOUSE_REASON)
 
 
+@dataclass(frozen=True)
+class PastAsk:
+    """Заданный ранее вопрос. Ровно то, что нужно правилу, — без строки БД целиком."""
+
+    pid: int
+    question: str
+    asc_sign: int | None
+
+
+def normalize(text: str) -> str:
+    """Приводит формулировку к виду, в котором её можно сравнивать.
+
+    Регистр, «ё», знаки препинания и лишние пробелы не меняют сути вопроса,
+    а `difflib` считает их отличиями.
+    """
+    text = text.lower().replace("ё", "е")
+    text = re.sub(r"[^а-яa-z0-9 ]+", " ", text)
+    return " ".join(text.split())
+
+
+def similarity(a: str, b: str) -> float:
+    """Близость формулировок, 0..1. Без внешних библиотек — хватает `difflib`."""
+    return difflib.SequenceMatcher(None, normalize(a), normalize(b)).ratio()
+
+
+def repeated_question(chart: PrashnaChart, question: str, history: Sequence[PastAsk]) -> Verdict:
+    """Тот же вопрос при той же лагне — отказ со ссылкой на прежнее толкование.
+
+    Лагна проходит знак ~2 часа: пока она не сменилась, карта отвечает то же самое,
+    и новый расчёт даст лишь иллюзию второго мнения. Прашны без `asc_sign` (заданные
+    до C-03) пропускаются: угадывать лагну задним числом хуже, чем не проверять.
+    """
+    for past in history:
+        if past.asc_sign is None or past.asc_sign != chart.asc_sign:
+            continue
+        if similarity(question, past.question) >= C.REPEAT_SIMILARITY:
+            return Verdict(status=REJECT, reason=repeat_reason(past.pid))
+    return Verdict()
+
+
 # Правило — функция (карта, вопрос) → Verdict. Списки наполняются в C-02…C-05:
 # порядок здесь и есть порядок проверки, от дешёвого к астрологическому.
 Rule = Callable[[PrashnaChart, str], Verdict]
@@ -70,13 +121,19 @@ REJECT_RULES: list[Rule] = [no_clear_house]
 CAUTION_RULES: list[Rule] = []
 
 
-def check(chart: PrashnaChart, question: str, user_id: int) -> Verdict:
+def check(
+    chart: PrashnaChart, question: str, user_id: int, history: Sequence[PastAsk] = ()
+) -> Verdict:
     """Собирает вердикт по включённым правилам. Первый `reject` прекращает разбор.
 
-    `user_id` нужен правилу повторного вопроса (C-03): оно единственное смотрит
-    на историю, и получит её через параметр, а не через импорт `db` — иначе модуль
-    перестанет быть чистым.
+    `history` — прежние вопросы пользователя, которые достаёт вызывающий код:
+    правилу повторного вопроса нужна БД, а модуль обязан оставаться чистым.
+    Пустая история означает «не проверяем», а не «повторов не было».
     """
+    repeat = repeated_question(chart, question, history)
+    if repeat.rejected:
+        return repeat
+
     cautions: list[str] = []
     for rule in REJECT_RULES:
         verdict = rule(chart, question)

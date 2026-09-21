@@ -120,3 +120,14 @@ def test_reserve_columns_step_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> 
         db._add_reserve_columns(c)  # второй прогон не должен падать
 
     assert {"reserved_at", "reserved_src"} <= _columns("usage")
+
+
+def test_asc_sign_step_is_idempotent() -> None:
+    """Шаг 2 → 3 тоже функция: повторный запуск не должен падать."""
+    with db.conn() as c:
+        c.execute("ALTER TABLE prashna DROP COLUMN asc_sign")
+        assert "asc_sign" not in _columns("prashna")
+        db._add_asc_sign_column(c)
+        db._add_asc_sign_column(c)
+
+    assert "asc_sign" in _columns("prashna")
