@@ -38,10 +38,8 @@ async def cancel(msg: Message, state: FSMContext) -> None:
 @router.message(Command("me"))
 async def me(msg: Message) -> None:
     place = await place_for(msg.from_user.id)
-    if msg.from_user.id in settings.admin_ids:
-        left: object = texts.UNLIMITED
-    else:
-        left = db.remaining(msg.from_user.id, settings.daily_limit)
+    ent = db.entitlement_for(msg.from_user.id)
+    left: object = texts.UNLIMITED if ent.unlimited else ent.left
     await msg.answer(
         texts.profile(
             html.escape(place.name), place.lat, place.lon, place.tz, left, settings.ayanamsa

@@ -18,6 +18,7 @@ from ..astro import constants as C
 from ..astro.chart import build_chart
 from ..astro.prashna import detect_house, judgment_factors, render_chart_text, render_short
 from ..config import settings
+from ..geo import Place
 from .common import place_for
 
 log = logging.getLogger(__name__)
@@ -50,16 +51,30 @@ async def prashna(msg: Message, state: FSMContext) -> None:
         await msg.answer(texts.QUESTION_TOO_LONG)
         return
 
-    if msg.from_user.id not in settings.admin_ids:
-        ok, reason = db.check_and_bump(
-            msg.from_user.id, settings.daily_limit, settings.cooldown_seconds
-        )
-        if not ok:
-            await msg.answer(reason)
-            return
-
     db.upsert_user(msg.from_user.id, msg.from_user.username)
+    # Место нужно для лагны, поэтому геоданные берём до резерва: иначе их сбой
+    # списал бы квант ни за что.
     place = await place_for(msg.from_user.id)
+
+    res, reason = db.reserve(msg.from_user.id, settings.cooldown_seconds)
+    if res is None:
+        await msg.answer(reason)
+        return
+
+    committed = False
+    try:
+        committed = await _answer(msg, question, place)
+    finally:
+        # Именно finally с флагом, а не except по списку типов: неучтённое
+        # исключение тоже обязано вернуть квант.
+        if committed:
+            db.commit(res)
+        else:
+            db.release(res)
+
+
+async def _answer(msg: Message, question: str, place: Place) -> bool:
+    """Карта → толкование → доставка. True = толкование дошло, квант списан по делу."""
     moment = datetime.now(timezone.utc)  # момент вопроса
 
     await msg.bot.send_chat_action(msg.chat.id, ChatAction.TYPING)
@@ -81,7 +96,7 @@ async def prashna(msg: Message, state: FSMContext) -> None:
     except Exception:
         log.exception("Ошибка расчёта карты")
         await msg.answer(texts.CHART_FAILED)
-        return
+        return False
 
     # Карта уходит до обращения к LLM: если толкование не придёт, у пользователя
     # всё равно останется расчёт на момент вопроса — повторить его уже нельзя.
@@ -101,17 +116,16 @@ async def prashna(msg: Message, state: FSMContext) -> None:
     except llm.LLMError as e:
         log.error("LLM: %s", e)
         await msg.answer(texts.LLM_UNAVAILABLE)
-        return
+        return False
 
     pid = db.save_prashna(msg.from_user.id, question, house, place.name, chart_text, answer)
 
     for chunk in chunks(html.escape(answer), CHUNK):
         await msg.answer(chunk)
-    if msg.from_user.id in settings.admin_ids:
-        left_txt = texts.UNLIMITED_PLAIN
-    else:
-        left_txt = str(db.remaining(msg.from_user.id, settings.daily_limit))
+    ent = db.entitlement_for(msg.from_user.id)
+    left_txt = texts.UNLIMITED_PLAIN if ent.unlimited else str(ent.left)
     await msg.answer(texts.prashna_footer(pid, left_txt))
+    return True
 
 
 @router.message()
