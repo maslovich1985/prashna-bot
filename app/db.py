@@ -41,7 +41,10 @@ CREATE TABLE IF NOT EXISTS prashna (
     -- его, а не текст карты. NULL у прашн, заданных до C-03.
     asc_sign    INTEGER,
     chart_text  TEXT,
-    answer      TEXT
+    answer      TEXT,
+    -- Причина отказа валидности (§5.5.3). NULL = обычная прашна с толкованием.
+    -- Отказы хранятся ради доли отказов в /stats и ссылки на расчёт.
+    reject_reason TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_prashna_user ON prashna(user_id, asked_at DESC);
 
@@ -107,6 +110,12 @@ def conn() -> Iterator[sqlite3.Connection]:
         c.close()
 
 
+def _add_reject_reason_column(c: sqlite3.Connection) -> None:
+    have = {r["name"] for r in c.execute("PRAGMA table_info(prashna)")}
+    if "reject_reason" not in have:
+        c.execute("ALTER TABLE prashna ADD COLUMN reject_reason TEXT")
+
+
 def _add_asc_sign_column(c: sqlite3.Connection) -> None:
     """Та же история, что и с колонками резерва: IF NOT EXISTS тут нет."""
     have = {r["name"] for r in c.execute("PRAGMA table_info(prashna)")}
@@ -158,6 +167,8 @@ CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, paid_at DESC);
     # 2 → 3: знак лагны в prashna (C-03). Старые строки остаются с NULL — правило
     # повторного вопроса их просто не увидит, что честнее, чем угадывать лагну задним числом.
     _add_asc_sign_column,
+    # 3 → 4: причина отказа в prashna (C-07).
+    _add_reject_reason_column,
 ]
 
 
@@ -461,13 +472,14 @@ def save_prashna(
     chart_text: str,
     answer: str,
     asc_sign: int | None = None,
+    reject_reason: str | None = None,
 ) -> int:
     with conn() as c:
         cur = c.execute(
             "INSERT INTO prashna "
-            "(user_id, asked_at, place, question, house, asc_sign, chart_text, answer) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (user_id, _now(), place, question, house, asc_sign, chart_text, answer),
+            "(user_id, asked_at, place, question, house, asc_sign, chart_text, answer, "
+            "reject_reason) VALUES (?,?,?,?,?,?,?,?,?)",
+            (user_id, _now(), place, question, house, asc_sign, chart_text, answer, reject_reason),
         )
         return int(cur.lastrowid)
 
@@ -488,7 +500,10 @@ def recent_prashna(user_id: int, hours: int, now: datetime | None = None) -> lis
 def history(user_id: int, limit: int = 10) -> list[dict[str, Any]]:
     with conn() as c:
         rows = c.execute(
-            "SELECT id, asked_at, question, house FROM prashna WHERE user_id=? "
+            # Отказы в список не идут: у них нет толкования, и /chart по ним
+            # показал бы пустой ответ. В /stats они считаются отдельно (I-01).
+            "SELECT id, asked_at, question, house FROM prashna "
+            "WHERE user_id=? AND reject_reason IS NULL "
             "ORDER BY asked_at DESC LIMIT ?",
             (user_id, limit),
         ).fetchall()

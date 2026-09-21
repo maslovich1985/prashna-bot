@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import dataclasses
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -13,6 +14,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Location
 
 from app import db, geo, llm, texts
+from app.astro import validity
 from app.config import settings
 from app.handlers import basic
 from app.handlers import prashna as prashna_handlers
@@ -20,6 +22,17 @@ from app.handlers import prashna as prashna_handlers
 USER_ID = 777  # совпадает с отправителем из фикстуры feed
 
 TOMSK = geo.Place("Томск", 56.5, 84.97, "Asia/Tomsk")
+
+
+@pytest.fixture(autouse=True)
+def valid_prashna(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Валидность считается по небу на момент прогона, и примерно в 15% моментов
+    карта отказная (§5.5.1). Без этой фиксации тесты пути падали бы через раз;
+    сам отказ проверяется отдельными тестами, которые фикстуру перекрывают.
+    """
+    monkeypatch.setattr(
+        prashna_handlers, "_validity_of", lambda *args, **kwargs: validity.Verdict()
+    )
 
 
 @pytest.fixture
@@ -282,3 +295,92 @@ async def test_telegram_refusal_keeps_answer_and_refunds(
     assert db.entitlement_for(USER_ID).left == before
     # Толкование сохранено до отправки: его можно забрать командой /chart.
     assert len(db.history(USER_ID, 10)) == 1
+
+
+# --- C-07: валидность в прашна-пути ---------------------------------------- #
+
+
+async def test_unclear_question_is_rejected_before_reserve(
+    feed, session, monkeypatch: pytest.MonkeyPatch, no_network
+) -> None:
+    """Вопрос без ясного дома: ни кванта, ни расчёта карты."""
+    built: list[int] = []
+    monkeypatch.setattr(prashna_handlers, "build_chart", lambda *a, **kw: built.append(1) or None)
+    before = db.entitlement_for(USER_ID).left
+
+    sent = await feed("ну что там вообще, интересно")
+
+    assert built == []
+    assert "не видно, о какой области жизни" in sent[-1].text
+    assert db.entitlement_for(USER_ID).left == before
+
+
+async def test_invalid_chart_shows_chart_and_refunds(
+    feed, session, monkeypatch: pytest.MonkeyPatch, no_network
+) -> None:
+    """Отказ по карте: карта показана, квант возвращён, LLM не звался."""
+    monkeypatch.setattr(
+        prashna_handlers,
+        "_validity_of",
+        lambda *a, **kw: validity.Verdict(
+            status=validity.REJECT, reason=validity.LAGNA_GANDANTA_REASON
+        ),
+    )
+    before = db.entitlement_for(USER_ID).left
+
+    sent = await feed("Получу ли я эту работу в этом году?")
+    texts_sent = [s.text for s in sent if s.text]
+
+    assert "Прашна принята" in texts_sent[0]  # расчёт показан, видно, что он был
+    assert "не годится для суждения" in texts_sent[-1]
+    assert "Вопрос не списан" in texts_sent[-1]
+    assert db.entitlement_for(USER_ID).left == before
+
+
+async def test_rejected_prashna_is_saved_with_reason(
+    feed, monkeypatch: pytest.MonkeyPatch, no_network
+) -> None:
+    monkeypatch.setattr(
+        prashna_handlers,
+        "_validity_of",
+        lambda *a, **kw: validity.Verdict(
+            status=validity.REJECT, reason=validity.KSHINA_CHANDRA_REASON
+        ),
+    )
+    await feed("Получу ли я эту работу в этом году?")
+
+    with db.conn() as c:
+        row = c.execute("SELECT question, reject_reason, answer FROM prashna").fetchone()
+    assert row["reject_reason"] == validity.KSHINA_CHANDRA_REASON
+    assert row["answer"] == ""
+    # В историю отказ не идёт: толкования нет, /chart показал бы пустоту.
+    assert db.history(USER_ID, 10) == []
+
+
+async def test_reject_with_retry_time_tells_when(
+    feed, monkeypatch: pytest.MonkeyPatch, no_network
+) -> None:
+    retry_at = datetime(2026, 9, 21, 12, 34, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        prashna_handlers,
+        "_validity_of",
+        lambda *a, **kw: validity.Verdict(
+            status=validity.REJECT, reason=validity.LAGNA_SANDHI_REASON, retry_at=retry_at
+        ),
+    )
+    sent = await feed("Получу ли я эту работу в этом году?")
+    assert "Спросите снова после" in sent[-1].text
+
+
+async def test_answered_prashna_stores_lagna(feed, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def answered(*args: Any, **kwargs: Any) -> llm.Answer:
+        return llm.Answer(text="Вердикт: да. " + "Обоснование. " * 20)
+
+    monkeypatch.setattr(prashna_handlers.llm, "interpret", answered)
+    await feed("Получу ли я эту работу в этом году?")
+
+    with db.conn() as c:
+        row = c.execute("SELECT asc_sign, reject_reason FROM prashna").fetchone()
+    # Лагна нужна правилу повторного вопроса (C-03).
+    assert row["asc_sign"] is not None
+    assert row["reject_reason"] is None
