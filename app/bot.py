@@ -25,6 +25,8 @@ async def run() -> None:
     )
     observability.init()
     db.init()
+    # Рестарт мог застать вопрос между reserve и commit — возвращаем такие кванты.
+    db.release_stale()
     bot = Bot(settings.telegram_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.outer_middleware(observability.SentryMiddleware())

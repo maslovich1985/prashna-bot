@@ -107,3 +107,16 @@ def test_no_backup_when_nothing_to_apply(monkeypatch: pytest.MonkeyPatch) -> Non
     db.init()  # все шаги уже применены — бэкап дёргать не за чем
 
     assert calls == []
+
+
+def test_reserve_columns_step_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Шаг-функция переживает повторный запуск: ADD COLUMN не умеет IF NOT EXISTS."""
+    with db.conn() as c:
+        c.execute("ALTER TABLE usage DROP COLUMN reserved_at")
+        c.execute("ALTER TABLE usage DROP COLUMN reserved_src")
+        assert "reserved_at" not in _columns("usage")
+        db._add_reserve_columns(c)
+        assert {"reserved_at", "reserved_src"} <= _columns("usage")
+        db._add_reserve_columns(c)  # второй прогон не должен падать
+
+    assert {"reserved_at", "reserved_src"} <= _columns("usage")

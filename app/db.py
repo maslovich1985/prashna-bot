@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 import sqlite3
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -43,10 +43,14 @@ CREATE TABLE IF NOT EXISTS prashna (
 CREATE INDEX IF NOT EXISTS idx_prashna_user ON prashna(user_id, asked_at DESC);
 
 CREATE TABLE IF NOT EXISTS usage (
-    user_id     INTEGER NOT NULL,
-    day         TEXT NOT NULL,
-    count       INTEGER NOT NULL DEFAULT 0,
-    last_at     TEXT,
+    user_id      INTEGER NOT NULL,
+    day          TEXT NOT NULL,
+    count        INTEGER NOT NULL DEFAULT 0,
+    last_at      TEXT,
+    -- Открытый резерв: momент списания и источник права, за счёт которого списали.
+    -- NULL = вопрос закрыт (commit) или квант уже возвращён (release).
+    reserved_at  TEXT,
+    reserved_src TEXT,
     PRIMARY KEY (user_id, day)
 );
 
@@ -100,11 +104,19 @@ def conn() -> Iterator[sqlite3.Connection]:
         c.close()
 
 
+def _add_reserve_columns(c: sqlite3.Connection) -> None:
+    """ALTER TABLE ... ADD COLUMN не умеет IF NOT EXISTS, поэтому смотрим схему сами."""
+    have = {r["name"] for r in c.execute("PRAGMA table_info(usage)")}
+    for column in ("reserved_at", "reserved_src"):
+        if column not in have:
+            c.execute(f"ALTER TABLE usage ADD COLUMN {column} TEXT")
+
+
 # Каждый элемент — один шаг, применяемый ровно один раз; индекс i соответствует
 # user_version = i + 1. Шаги только дописывают схему: откат кода не должен оставлять
 # базу нечитаемой для предыдущей версии. Менять уже выпущенный шаг нельзя — на серверах,
 # где он применён, правка не выполнится; нужен новый шаг в конце списка.
-MIGRATIONS: list[str] = [
+MIGRATIONS: list[str | Callable[[sqlite3.Connection], None]] = [
     # 0 → 1: таблицы квот и платежей (B-01). Только CREATE TABLE IF NOT EXISTS —
     # существующие данные не трогаются, прошлая версия кода такую базу ещё читает.
     """
@@ -129,7 +141,10 @@ CREATE TABLE IF NOT EXISTS payments (
     refunded_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, paid_at DESC);
-"""
+""",
+    # 1 → 2: открытый резерв в usage (B-06). Колонки добавляются пустыми, старый код
+    # их не замечает: он писал в usage по именам, а не по SELECT *.
+    _add_reserve_columns,
 ]
 
 
@@ -158,9 +173,14 @@ def migrate() -> None:
     _backup_before_migrate()
 
     with conn() as c:
-        for i, sql in enumerate(pending, start=version):
+        for i, step in enumerate(pending, start=version):
             log.info("Миграция %d → %d", i, i + 1)
-            c.executescript(sql)
+            # Шаг — либо SQL-скрипт, либо функция: чистым SQL идемпотентно добавить
+            # колонку нельзя, а шаг обязан переживать повторный запуск.
+            if callable(step):
+                step(c)
+            else:
+                c.executescript(step)
             c.execute(f"PRAGMA user_version = {i + 1}")
 
 
@@ -288,6 +308,9 @@ def entitlement_for(user_id: int, now: datetime | None = None) -> Entitlement:
 # ------------------------- резерв кванта вопроса --------------------------- #
 
 
+RESERVE_TTL = 300  # с; дольше вопрос не обрабатывается — карта и LLM укладываются в минуты
+
+
 @dataclass(frozen=True)
 class Reservation:
     """Квант, списанный под один вопрос. Возвращается `release`, закрепляется `commit`."""
@@ -328,10 +351,12 @@ def reserve(user_id: int, cooldown: int) -> tuple[Reservation | None, str]:
             return None, texts.daily_limit_reached(ent.daily_limit)
 
         c.execute(
-            "INSERT INTO usage (user_id, day, count, last_at) VALUES (?,?,1,?) "
+            "INSERT INTO usage (user_id, day, count, last_at, reserved_at, reserved_src) "
+            "VALUES (?,?,1,?,?,?) "
             "ON CONFLICT(user_id, day) DO UPDATE SET "
-            "count = usage.count + 1, last_at = excluded.last_at",
-            (user_id, day, now.isoformat()),
+            "count = usage.count + 1, last_at = excluded.last_at, "
+            "reserved_at = excluded.reserved_at, reserved_src = excluded.reserved_src",
+            (user_id, day, now.isoformat(), now.isoformat(), ent.source),
         )
         if ent.source == "questions":
             c.execute(
@@ -350,7 +375,17 @@ def reserve(user_id: int, cooldown: int) -> tuple[Reservation | None, str]:
 
 
 def commit(res: Reservation) -> None:
-    """Закрепляет резерв. Квант уже списан в `reserve`, отдельной записи не нужно."""
+    """Закрепляет резерв: квант списан ещё в `reserve`, здесь снимается пометка.
+
+    Без неё рестарт-сборщик (`release_stale`) вернул бы уже отработанный вопрос.
+    """
+    if res.source == "admin":
+        return
+    with conn() as c:
+        c.execute(
+            "UPDATE usage SET reserved_at = NULL, reserved_src = NULL WHERE user_id=? AND day=?",
+            (res.user_id, res.day),
+        )
 
 
 def release(res: Reservation) -> None:
@@ -359,7 +394,8 @@ def release(res: Reservation) -> None:
         return
     with conn() as c:
         c.execute(
-            "UPDATE usage SET count = MAX(count - 1, 0) WHERE user_id=? AND day=?",
+            "UPDATE usage SET count = MAX(count - 1, 0), reserved_at = NULL, "
+            "reserved_src = NULL WHERE user_id=? AND day=?",
             (res.user_id, res.day),
         )
         if res.source == "questions":
@@ -374,6 +410,31 @@ def release(res: Reservation) -> None:
                 "WHERE user_id = ?",
                 (_now(), res.user_id),
             )
+
+
+def release_stale(now: datetime | None = None) -> int:
+    """Возвращает кванты по резервам старше `RESERVE_TTL`. Вызывается один раз при старте.
+
+    Рестарт между `reserve` и `commit` (деплой, OOM) иначе съедает вопрос молча:
+    закрепить его уже некому.
+    """
+    moment = now or datetime.now(timezone.utc)
+    cutoff = (moment - timedelta(seconds=RESERVE_TTL)).isoformat()
+    with conn() as c:
+        rows = c.execute(
+            "SELECT user_id, day, reserved_src FROM usage "
+            "WHERE reserved_at IS NOT NULL AND reserved_at < ?",
+            (cutoff,),
+        ).fetchall()
+    for row in rows:
+        release(
+            Reservation(
+                user_id=row["user_id"], source=row["reserved_src"] or "subscription", day=row["day"]
+            )
+        )
+    if rows:
+        log.info("Возвращено висящих резервов: %d", len(rows))
+    return len(rows)
 
 
 # ------------------------------- история ---------------------------------- #
