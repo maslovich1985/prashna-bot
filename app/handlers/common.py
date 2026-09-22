@@ -51,13 +51,21 @@ async def place_for(user_id: int) -> geo.Place | None:
     return None
 
 
-def buy_kb() -> InlineKeyboardMarkup:
-    """Кнопку обрабатывает billing: продажами владеет он, экраны только зовут."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=texts.BALANCE_BUY_BUTTON, callback_data=BUY_CALLBACK)]
-        ]
-    )
+INVITE_CALLBACK = "balance:invite"
+
+
+def buy_kb(with_invite: bool = False) -> InlineKeyboardMarkup:
+    """Кнопку покупки обрабатывает billing: продажами владеет он, экраны только зовут."""
+    rows = [[InlineKeyboardButton(text=texts.BALANCE_BUY_BUTTON, callback_data=BUY_CALLBACK)]]
+    if with_invite:
+        rows.append(
+            [InlineKeyboardButton(text=texts.BALANCE_INVITE_BUTTON, callback_data=INVITE_CALLBACK)]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def invite_link(bot_username: str, user_id: int) -> str:
+    return f"https://t.me/{bot_username}?start=ref{user_id}"
 
 
 def looks_like_city(text: str) -> bool:

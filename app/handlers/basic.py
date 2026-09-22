@@ -21,8 +21,8 @@ from aiogram.types import (
 
 from .. import db, texts
 from ..config import settings
-from ..constants import TRIAL_QUESTIONS
-from .common import buy_kb, main_kb, place_for
+from ..constants import REFERRAL_BONUS, REFERRAL_MAX, TRIAL_QUESTIONS
+from .common import INVITE_CALLBACK, buy_kb, invite_link, main_kb, place_for
 
 router = Router(name="basic")
 
@@ -195,3 +195,19 @@ async def history_button(msg: Message, state: FSMContext) -> None:
 async def help_button(msg: Message, state: FSMContext) -> None:
     await state.clear()
     await help_cmd(msg)
+
+
+@router.callback_query(F.data == INVITE_CALLBACK)
+async def invite(call: CallbackQuery) -> None:
+    await call.answer()
+    if call.message is None:
+        return
+    me = await call.bot.get_me()
+    await call.message.answer(
+        texts.invite(
+            invite_link(me.username, call.from_user.id),
+            db.referrals_of(call.from_user.id),
+            REFERRAL_BONUS,
+            REFERRAL_MAX,
+        )
+    )
