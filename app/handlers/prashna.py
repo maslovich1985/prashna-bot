@@ -21,8 +21,9 @@ from ..astro import validity
 from ..astro.chart import PrashnaChart, build_chart, sky_at
 from ..astro.prashna import detect_house, judgment_factors, render_chart_text, render_short
 from ..config import settings
+from ..constants import CONSULT_PRICE_MAX, CONSULT_PRICE_MIN
 from ..geo import Place
-from .common import place_for
+from .common import buy_kb, place_for
 
 log = logging.getLogger(__name__)
 router = Router(name="prashna")
@@ -84,7 +85,14 @@ async def prashna(msg: Message, state: FSMContext) -> None:
 
     res, reason = db.reserve(msg.from_user.id, settings.cooldown_seconds)
     if res is None:
-        await msg.answer(reason)
+        # Кончились пробные — момент решения, а не сухой отказ: показываем, с чем
+        # сравнивать. Кулдаун и суточный лимит остаются обычным сообщением.
+        if not db.entitlement_for(msg.from_user.id).allowed:
+            await msg.answer(
+                texts.sales_pitch(CONSULT_PRICE_MIN, CONSULT_PRICE_MAX), reply_markup=buy_kb()
+            )
+        else:
+            await msg.answer(reason)
         return
 
     committed = False
