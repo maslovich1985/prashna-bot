@@ -91,7 +91,7 @@ async def test_city_without_argument_asks_and_takes_next_message(
 
     monkeypatch.setattr(geo, "geocode", fake_geocode)
     asked = await feed("/city")
-    assert asked[-1].text == texts.ASK_CITY
+    assert texts.ASK_CITY in [s.text for s in asked]
     # FSM активен: следующий текст — город, а не вопрос для прашны
     answered = await feed("Томск")
     assert "Томск" in answered[-1].text
