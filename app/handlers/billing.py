@@ -1,10 +1,11 @@
-"""Оплата звёздами: /subscribe → инвойс (D-01) → pre-checkout (D-02) → выдача (D-03)."""
+"""Оплата звёздами: инвойс (D-01), pre-checkout (D-02), выдача (D-03), возврат (D-05)."""
 
 from __future__ import annotations
 
 import logging
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
@@ -134,3 +135,45 @@ async def successful_payment(msg: Message) -> None:
 
     ent = db.entitlement_for(msg.from_user.id)
     await msg.answer(texts.payment_done(plan, ent))
+
+
+@router.message(Command("refund"))
+async def refund(msg: Message) -> None:
+    """Возврат звёзд админской командой: `/refund <charge_id>`.
+
+    Сначала Telegram возвращает деньги, и только потом отзывается доступ: обратный
+    порядок оставил бы пользователя без доступа и без денег, если возврат не прошёл.
+    """
+    if msg.from_user.id not in settings.admin_ids:
+        await msg.answer(texts.REFUND_DENIED)
+        return
+
+    charge_id = (msg.text or "").partition(" ")[2].strip()
+    if not charge_id:
+        await msg.answer(texts.REFUND_USAGE)
+        return
+
+    payment = db.get_payment(charge_id)
+    if payment is None:
+        await msg.answer(texts.refund_unknown(charge_id))
+        return
+    if payment["refunded_at"]:
+        await msg.answer(texts.refund_already(charge_id, payment["refunded_at"]))
+        return
+
+    try:
+        await msg.bot.refund_star_payment(payment["user_id"], charge_id)
+    except TelegramAPIError as e:
+        # Деньги не вернулись — доступ не трогаем, иначе он пропадёт впустую.
+        log.exception("Возврат %s не прошёл", charge_id)
+        await msg.answer(texts.refund_failed(charge_id, str(e)))
+        return
+
+    db.refund(charge_id)
+    await msg.answer(texts.refund_done(charge_id, payment["user_id"], payment["stars"]))
+
+    try:
+        await msg.bot.send_message(payment["user_id"], texts.refund_notice(payment["stars"]))
+    except TelegramAPIError:
+        # Пользователь мог заблокировать бота: возврат уже состоялся, это не ошибка.
+        log.warning("Не удалось сообщить о возврате пользователю %s", payment["user_id"])

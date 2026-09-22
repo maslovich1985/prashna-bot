@@ -301,3 +301,41 @@ def paysupport(contact: str) -> str:
         "Полные условия — /terms.\n\n"
         "Оплата проходит звёздами Telegram, карту бот не видит."
     )
+
+
+REFUND_DENIED = "Возвраты делает только администратор бота."
+
+REFUND_USAGE = (
+    "Укажите номер платежа: <code>/refund &lt;charge_id&gt;</code>\n"
+    "Номер есть в таблице payments и в подтверждении об оплате."
+)
+
+
+def refund_unknown(charge_id: str) -> str:
+    return f"Платёж <code>{charge_id}</code> не найден."
+
+
+def refund_already(charge_id: str, when: str) -> str:
+    return f"Платёж <code>{charge_id}</code> уже возвращён {when}."
+
+
+def refund_failed(charge_id: str, detail: str) -> str:
+    return (
+        f"⚠️ Telegram не вернул платёж <code>{charge_id}</code>: {detail}\n"
+        "Доступ не отозван — деньги у пользователя не тронуты."
+    )
+
+
+def refund_done(charge_id: str, user_id: int, stars: int) -> str:
+    return (
+        f"✅ Возвращено {stars} ⭐️ пользователю {user_id}.\n"
+        f"Платёж <code>{charge_id}</code> помечен возвращённым, доступ отозван."
+    )
+
+
+def refund_notice(stars: int) -> str:
+    return (
+        f"↩️ <b>Возврат {stars} ⭐️</b>\n\n"
+        "Звёзды вернулись на ваш баланс Telegram, выданный за них доступ отозван.\n"
+        "Вопросы по платежам — /paysupport."
+    )

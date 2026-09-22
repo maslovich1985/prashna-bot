@@ -1,4 +1,4 @@
-"""Оплата звёздами: /subscribe и инвойс (D-01), pre_checkout (D-02), выдача (D-03)."""
+"""Оплата звёздами: инвойс (D-01), pre_checkout (D-02), выдача (D-03), возврат (D-05)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ import time
 from typing import Any
 
 import pytest
+from aiogram.exceptions import TelegramAPIError
+from aiogram.methods import RefundStarPayment
 
 from app import alerts, db, geo, llm, texts
 from app.config import settings
@@ -196,3 +198,72 @@ def test_payment_commands_are_in_the_menu() -> None:
     commands = [c.command for c in bot_module.BOT_COMMANDS]
     assert "terms" in commands
     assert "paysupport" in commands
+
+
+# --- D-05: возврат --------------------------------------------------------- #
+
+
+@pytest.fixture
+def as_admin(monkeypatch: pytest.MonkeyPatch, user_id) -> None:
+    monkeypatch.setattr(billing, "settings", dataclasses.replace(settings, admin_ids=(user_id,)))
+
+
+async def test_refund_is_admin_only(feed, feed_payment) -> None:
+    await feed_payment("pack10", "ch-1", 100)
+    sent = await feed("/refund ch-1")
+    assert sent[0].text == texts.REFUND_DENIED
+    assert db.get_payment("ch-1")["refunded_at"] is None
+
+
+async def test_refund_without_argument_explains_itself(feed, as_admin) -> None:
+    sent = await feed("/refund")
+    assert sent[0].text == texts.REFUND_USAGE
+
+
+async def test_refund_of_unknown_payment_says_so(feed, as_admin) -> None:
+    sent = await feed("/refund нет-такого")
+    assert sent[0].text == texts.refund_unknown("нет-такого")
+
+
+async def test_refund_returns_stars_and_revokes_access(
+    feed, feed_payment, as_admin, user_id
+) -> None:
+    await feed_payment("pack10", "ch-1", 100)
+    sent = await feed("/refund ch-1")
+
+    call = next(s for s in sent if s.method == "RefundStarPayment")
+    assert call.data["user_id"] == user_id
+    assert call.data["telegram_payment_charge_id"] == "ch-1"
+    assert db.get_payment("ch-1")["refunded_at"] is not None
+    assert db.entitlement_for(user_id).source == "trial"
+    # Пользователь узнаёт о возврате сам, а не по пропавшему доступу.
+    assert any(texts.refund_notice(100) in s.text for s in sent)
+
+
+async def test_second_refund_is_refused(feed, feed_payment, as_admin) -> None:
+    await feed_payment("pack10", "ch-1", 100)
+    await feed("/refund ch-1")
+    sent = await feed("/refund ch-1")
+    assert "уже возвращён" in sent[0].text
+    assert not [s for s in sent if s.method == "RefundStarPayment"]
+
+
+async def test_failed_refund_leaves_access_alone(
+    feed, feed_payment, as_admin, bot, user_id, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Если Telegram не вернул деньги, отзывать доступ нельзя: пользователь
+    остался бы и без доступа, и без звёзд."""
+    await feed_payment("pack10", "ch-1", 100)
+
+    async def _boom(*args: Any, **kwargs: Any) -> None:
+        raise TelegramAPIError(
+            method=RefundStarPayment(user_id=user_id, telegram_payment_charge_id="ch-1"),
+            message="нет",
+        )
+
+    monkeypatch.setattr(bot, "refund_star_payment", _boom)
+    sent = await feed("/refund ch-1")
+
+    assert "не вернул платёж" in sent[0].text
+    assert db.get_payment("ch-1")["refunded_at"] is None
+    assert db.entitlement_for(user_id).source == "questions"
