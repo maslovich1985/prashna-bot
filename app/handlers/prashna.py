@@ -21,7 +21,7 @@ from ..astro import validity
 from ..astro.chart import PrashnaChart, build_chart, sky_at
 from ..astro.prashna import detect_house, judgment_factors, render_chart_text, render_short
 from ..config import settings
-from ..constants import CONSULT_PRICE_MAX, CONSULT_PRICE_MIN
+from ..constants import CONSULT_PRICE_MAX, CONSULT_PRICE_MIN, REFERRAL_BONUS
 from ..geo import Place
 from .common import buy_kb, looks_like_city, place_for
 from .place import cities_kb, pending_city_kb
@@ -118,9 +118,21 @@ async def prashna(msg: Message, state: FSMContext) -> None:
         # Именно finally с флагом, а не except по списку типов: неучтённое
         # исключение тоже обязано вернуть квант.
         if committed:
-            db.commit(res)
+            referrer_id = db.commit(res)
+            if referrer_id is not None:
+                await _notify_referrer(msg, referrer_id)
         else:
             db.release(res)
+
+
+async def _notify_referrer(msg: Message, referrer_id: int) -> None:
+    """Сообщает пригласившему о бонусе. Ни имени, ни id приглашённого: он не давал
+    согласия на раскрытие того, что обращался к астрологическому боту."""
+    try:
+        await msg.bot.send_message(referrer_id, texts.referral_paid(REFERRAL_BONUS))
+    except TelegramAPIError:
+        # Заблокировал бота или удалил чат: бонус начислен, это не повод падать.
+        log.warning("Не удалось уведомить пригласившего %s", referrer_id)
 
 
 def _validity_of(
