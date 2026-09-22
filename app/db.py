@@ -26,6 +26,10 @@ CREATE TABLE IF NOT EXISTS users (
     lat         REAL,
     lon         REAL,
     tz          TEXT,
+    -- Кто пригласил (G-01). Пишется один раз при первом /start по ссылке и больше
+    -- не меняется: иначе старого пользователя можно переприглашать без конца.
+    referrer_id   INTEGER,
+    referral_paid INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -113,6 +117,14 @@ def conn() -> Iterator[sqlite3.Connection]:
         c.close()
 
 
+def _add_referral_columns(c: sqlite3.Connection) -> None:
+    have = {r["name"] for r in c.execute("PRAGMA table_info(users)")}
+    if "referrer_id" not in have:
+        c.execute("ALTER TABLE users ADD COLUMN referrer_id INTEGER")
+    if "referral_paid" not in have:
+        c.execute("ALTER TABLE users ADD COLUMN referral_paid INTEGER NOT NULL DEFAULT 0")
+
+
 def _add_rejects_column(c: sqlite3.Connection) -> None:
     have = {r["name"] for r in c.execute("PRAGMA table_info(usage)")}
     if "rejects" not in have:
@@ -180,6 +192,9 @@ CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, paid_at DESC);
     _add_reject_reason_column,
     # 4 → 5: счётчик отказов в usage (C-08).
     _add_rejects_column,
+    # 5 → 6: рефералка (G-01). Колонки добавляются пустыми, прошлая версия кода
+    # их просто не читает.
+    _add_referral_columns,
 ]
 
 
@@ -256,6 +271,39 @@ def upsert_user(user_id: int, username: str | None = None, **fields: Any) -> Non
                 f"UPDATE users SET {cols}, updated_at = ? WHERE user_id = ?",
                 (*fields.values(), _now(), user_id),
             )
+
+
+def note_referral(user_id: int, referrer_id: int) -> bool:
+    """Записывает пригласившего. `False` — запись не сделана, и это норма.
+
+    Пишем только новому пользователю и только если `referrer_id` ещё `NULL`:
+    иначе старого можно «переприглашать» под разными ссылками сколько угодно.
+    Самоприглашение отбрасывается по той же причине — это дыра, а не ошибка ввода.
+    """
+    if user_id == referrer_id:
+        return False
+    with conn() as c:
+        # Уже знакомый пользователь не «переприглашается»: важно, что строки ещё нет,
+        # а не только что `referrer_id` пуст.
+        if c.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,)).fetchone() is not None:
+            return False
+        # Пригласивший должен существовать: ссылка со случайным числом не создаёт
+        # ни связи, ни будущего бонуса.
+        if c.execute("SELECT 1 FROM users WHERE user_id = ?", (referrer_id,)).fetchone() is None:
+            return False
+        c.execute(
+            "INSERT INTO users (user_id, referrer_id, created_at, updated_at) VALUES (?,?,?,?)",
+            (user_id, referrer_id, _now(), _now()),
+        )
+    return True
+
+
+def referrals_of(referrer_id: int) -> int:
+    with conn() as c:
+        row = c.execute(
+            "SELECT COUNT(*) AS n FROM users WHERE referrer_id = ?", (referrer_id,)
+        ).fetchone()
+    return int(row["n"])
 
 
 # -------------------------------- лимиты ---------------------------------- #
