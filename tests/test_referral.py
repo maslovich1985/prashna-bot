@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from app import db, geo, llm
+from app.constants import REFERRAL_BONUS, REFERRAL_MAX, TRIAL_QUESTIONS
 from app.handlers.basic import referrer_from
 
 INVITER = 601
@@ -103,3 +104,81 @@ async def test_self_invite_through_start_is_ignored(feed, user_id) -> None:
 def test_referral_paid_starts_at_zero(inviter: int) -> None:
     db.note_referral(NEWCOMER, inviter)
     assert db.get_user(NEWCOMER)["referral_paid"] == 0
+
+
+# --- G-02: начисление бонуса ----------------------------------------------- #
+
+
+def _ask(user_id: int) -> None:
+    """Один вопрос, доведённый до конца: резерв + commit."""
+    res, reason = db.reserve(user_id, cooldown=0)
+    assert res is not None, reason
+    db.commit(res)
+
+
+def test_bonus_lands_after_the_first_question(inviter: int) -> None:
+    db.note_referral(NEWCOMER, inviter)
+    # /start бонуса не даёт: платим за первый доведённый до конца вопрос.
+    assert db.get_entitlement(inviter) is None
+
+    _ask(NEWCOMER)
+    assert db.get_entitlement(inviter)["questions_left"] == REFERRAL_BONUS
+
+
+def test_bonus_is_paid_once(inviter: int) -> None:
+    db.note_referral(NEWCOMER, inviter)
+    _ask(NEWCOMER)
+    _ask(NEWCOMER)
+    assert db.get_entitlement(inviter)["questions_left"] == REFERRAL_BONUS
+
+
+def test_bonus_goes_to_questions_not_trials(inviter: int) -> None:
+    # trial_used обнуляется при /delete_me, а заработанное — нет.
+    db.note_referral(NEWCOMER, inviter)
+    _ask(NEWCOMER)
+    row = db.get_entitlement(inviter)
+    assert row["trial_used"] == 0
+    assert row["questions_left"] == REFERRAL_BONUS
+
+
+def test_invitee_gets_nothing_extra(inviter: int) -> None:
+    db.note_referral(NEWCOMER, inviter)
+    _ask(NEWCOMER)
+    left = db.entitlement_for(NEWCOMER).left
+    assert db.entitlement_for(NEWCOMER).source == "trial"
+    assert left == TRIAL_QUESTIONS - 1
+
+
+def test_bonus_stops_at_the_limit(inviter: int) -> None:
+    for i in range(REFERRAL_MAX + 2):
+        invitee = 700 + i
+        db.note_referral(invitee, inviter)
+        _ask(invitee)
+    assert db.get_entitlement(inviter)["questions_left"] == REFERRAL_BONUS * REFERRAL_MAX
+
+
+def test_commit_reports_the_referrer(inviter: int) -> None:
+    # Уведомление приглашающему — G-03; commit отдаёт, кому его слать.
+    db.note_referral(NEWCOMER, inviter)
+    res, _ = db.reserve(NEWCOMER, cooldown=0)
+    assert db.commit(res) == inviter
+
+    res, _ = db.reserve(NEWCOMER, cooldown=0)
+    assert db.commit(res) is None
+
+
+def test_deleting_and_returning_pays_nothing_twice(inviter: int) -> None:
+    """Журнал выплат переживает /delete_me — иначе удаление приносит бонус снова."""
+    db.note_referral(NEWCOMER, inviter)
+    _ask(NEWCOMER)
+    db.delete_user_data(NEWCOMER)
+
+    db.note_referral(NEWCOMER, inviter)
+    _ask(NEWCOMER)
+    assert db.get_entitlement(inviter)["questions_left"] == REFERRAL_BONUS
+
+
+def test_question_without_a_referrer_pays_nobody(user_id: int) -> None:
+    db.upsert_user(user_id, "solo")
+    _ask(user_id)
+    assert db.get_entitlement(user_id)["questions_left"] == 0
