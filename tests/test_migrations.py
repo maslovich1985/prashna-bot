@@ -8,7 +8,10 @@ import pytest
 
 from app import db
 
-ADD_COLUMN = "ALTER TABLE users ADD COLUMN referrer_id INTEGER"
+# Колонка выдуманная: брать настоящую нельзя — она уже есть в SCHEMA,
+# и шаг упал бы на «duplicate column name».
+DEMO_COLUMN = "demo_flag"
+ADD_COLUMN = f"ALTER TABLE users ADD COLUMN {DEMO_COLUMN} INTEGER"
 ADD_TABLE = "CREATE TABLE IF NOT EXISTS demo (id INTEGER PRIMARY KEY)"
 
 # Реальные шаги уже применены к базе из фикстуры: свои проверки строим поверх них,
@@ -39,7 +42,7 @@ def test_fresh_db_is_marked_as_current(monkeypatch: pytest.MonkeyPatch, db_path:
     db_path.unlink()
     db.init()
     assert _user_version() == 2
-    assert "referrer_id" not in _columns("users")  # SCHEMA сама по себе колонку не добавляет
+    assert DEMO_COLUMN not in _columns("users")  # SCHEMA сама по себе колонку не добавляет
 
 
 def test_old_db_gets_new_column(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -48,7 +51,7 @@ def test_old_db_gets_new_column(monkeypatch: pytest.MonkeyPatch) -> None:
 
     db.init()
 
-    assert "referrer_id" in _columns("users")
+    assert DEMO_COLUMN in _columns("users")
     assert _user_version() == BASE + 1
 
 
@@ -60,7 +63,7 @@ def test_data_survives_migration(monkeypatch: pytest.MonkeyPatch) -> None:
 
     user = db.get_user(1)
     assert user["username"] == "tester"
-    assert user["referrer_id"] is None
+    assert user[DEMO_COLUMN] is None
 
 
 def test_second_init_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,7 +99,7 @@ def test_backup_failure_stops_migration(monkeypatch: pytest.MonkeyPatch) -> None
         db.init()
 
     # Схема не тронута: без свежей копии откат кода остался бы с уехавшей схемой
-    assert "referrer_id" not in _columns("users")
+    assert DEMO_COLUMN not in _columns("users")
     assert _user_version() == BASE
 
 
