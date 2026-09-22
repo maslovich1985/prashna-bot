@@ -14,6 +14,16 @@ from app.handlers.common import INVITE_CALLBACK, invite_link
 
 INVITER = 611
 
+TOMSK = {"place": "Томск", "lat": 56.5, "lon": 84.97, "tz": "Asia/Tomsk"}
+
+
+def _invited_by_inviter(user_id: int) -> None:
+    """Связь пишется только новичку, поэтому место задаём уже после неё —
+    `with_place` создала бы строку пользователя раньше и связь бы не легла."""
+    db.upsert_user(INVITER, "inviter")
+    db.note_referral(user_id, INVITER)
+    db.upsert_user(user_id, "tester", **TOMSK)
+
 
 @pytest.fixture(autouse=True)
 def valid_prashna(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -62,9 +72,8 @@ async def test_invite_screen_counts_arrivals(feed, feed_callback, user_id) -> No
     assert "<b>2</b>" in sent[-1].text
 
 
-async def test_inviter_is_notified_after_the_first_question(feed, session, user_id, with_place):
-    db.upsert_user(INVITER, "inviter")
-    db.note_referral(user_id, INVITER)
+async def test_inviter_is_notified_after_the_first_question(feed, session, user_id) -> None:
+    _invited_by_inviter(user_id)
 
     await feed("Получу ли я эту работу?")
 
@@ -72,10 +81,9 @@ async def test_inviter_is_notified_after_the_first_question(feed, session, user_
     assert texts.referral_paid(REFERRAL_BONUS) == notice.text
 
 
-async def test_notification_hides_the_invitee(feed, session, user_id, with_place) -> None:
+async def test_notification_hides_the_invitee(feed, session, user_id) -> None:
     """DoD: ни имени, ни user_id приглашённого в исходящем сообщении."""
-    db.upsert_user(INVITER, "inviter")
-    db.note_referral(user_id, INVITER)
+    _invited_by_inviter(user_id)
 
     await feed("Получу ли я эту работу?")
 
@@ -84,9 +92,8 @@ async def test_notification_hides_the_invitee(feed, session, user_id, with_place
     assert "tester" not in notice.text
 
 
-async def test_second_question_notifies_nobody(feed, session, user_id, with_place) -> None:
-    db.upsert_user(INVITER, "inviter")
-    db.note_referral(user_id, INVITER)
+async def test_second_question_notifies_nobody(feed, session, user_id) -> None:
+    _invited_by_inviter(user_id)
     await feed("Получу ли я эту работу?")
     before = len(session.sent)
 
@@ -95,12 +102,11 @@ async def test_second_question_notifies_nobody(feed, session, user_id, with_plac
 
 
 async def test_blocked_inviter_does_not_break_the_answer(
-    feed, session, user_id, with_place, monkeypatch: pytest.MonkeyPatch
+    feed, session, user_id, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from aiogram.exceptions import TelegramForbiddenError
 
-    db.upsert_user(INVITER, "inviter")
-    db.note_referral(user_id, INVITER)
+    _invited_by_inviter(user_id)
 
     original = session.make_request
 

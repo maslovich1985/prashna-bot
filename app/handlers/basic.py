@@ -182,7 +182,9 @@ async def balance_button(msg: Message, state: FSMContext) -> None:
     ent = db.entitlement_for(msg.from_user.id)
     row = db.get_entitlement(msg.from_user.id) or {}
     used = int(row.get("trial_used") or 0)
-    await msg.answer(texts.balance(ent, used, TRIAL_QUESTIONS), reply_markup=buy_kb())
+    await msg.answer(
+        texts.balance(ent, used, TRIAL_QUESTIONS), reply_markup=buy_kb(with_invite=True)
+    )
 
 
 @router.message(F.text == texts.BTN_HISTORY)
