@@ -49,6 +49,14 @@ def test_registration_order() -> None:
     assert _handler_names() == EXPECTED_ORDER
 
 
+def test_billing_answers_pre_checkout() -> None:
+    # Без этого хэндлера Telegram отменяет платёж по таймауту в 10 секунд.
+    from app.handlers import billing
+
+    names = [h.callback.__name__ for h in billing.router.pre_checkout_query.handlers]
+    assert names == ["pre_checkout"]
+
+
 def test_prashna_router_is_last() -> None:
     assert ROUTERS[-1].name == "prashna"
 

@@ -15,7 +15,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.base import BaseSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import CallbackQuery, Chat, Location, Message, Update, User
+from aiogram.types import CallbackQuery, Chat, Location, Message, PreCheckoutQuery, Update, User
 
 from app import db as db_module
 from app.config import settings
@@ -176,6 +176,30 @@ def feed_callback(bot: Bot, dp: Dispatcher, session: FakeSession):
                 chat_instance="test",
                 message=make_message(user_id=user_id),
                 data=data,
+            ),
+        )
+        await dp.feed_update(bot, update)
+        return session.sent[before:]
+
+    return _feed
+
+
+@pytest.fixture
+def feed_pre_checkout(bot: Bot, dp: Dispatcher, session: FakeSession):
+    """Апдейт pre_checkout_query: Telegram ждёт ответа не дольше 10 секунд."""
+
+    async def _feed(
+        payload: str, total_amount: int, currency: str = "XTR", user_id: int = USER_ID
+    ) -> list[Sent]:
+        before = len(session.sent)
+        update = Update(
+            update_id=next(_message_ids),
+            pre_checkout_query=PreCheckoutQuery(
+                id=str(next(_message_ids)),
+                from_user=User(id=user_id, is_bot=False, first_name="Тест", username="tester"),
+                currency=currency,
+                total_amount=total_amount,
+                invoice_payload=payload,
             ),
         )
         await dp.feed_update(bot, update)

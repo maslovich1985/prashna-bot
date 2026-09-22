@@ -234,3 +234,6 @@ def plan_description(plan: Plan) -> str:
     if plan.is_subscription:
         return f"{plan.days} дней, до {plan.daily_limit} вопросов в сутки."
     return f"{plan.questions} вопросов без ограничения по сроку."
+
+
+CHECKOUT_AMOUNT_MISMATCH = "Сумма платежа не совпала с тарифом. Откройте /subscribe заново."
