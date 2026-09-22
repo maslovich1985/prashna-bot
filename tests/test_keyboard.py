@@ -61,14 +61,14 @@ async def test_history_button_matches_history(feed) -> None:
 
 async def test_help_button_shows_help(feed) -> None:
     sent = await feed(texts.BTN_HELP)
-    assert sent[0].text == texts.WELCOME
+    assert sent[0].text == texts.HELP_MENU
 
 
 async def test_button_press_drops_pending_city_input(feed, user_id) -> None:
     """Нажатие кнопки посреди ввода города означает, что ввод брошен."""
     await feed("/city")
     sent = await feed(texts.BTN_HELP)
-    assert sent[0].text == texts.WELCOME
+    assert sent[0].text == texts.HELP_MENU
     # Город не установлен: текст кнопки геокодером не искали.
     assert db.get_user(user_id) is None or db.get_user(user_id)["lat"] is None
 
