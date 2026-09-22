@@ -1,4 +1,7 @@
-"""Команды: /start, /help, /cancel, /me, /history, /chart, /forget, /stats."""
+"""Команды: /start, /help, /cancel, /me, /history, /chart, /forget, /stats.
+
+/privacy и /delete_me живут в privacy.py — у приватности свой роутер.
+"""
 
 from __future__ import annotations
 
@@ -27,11 +30,6 @@ async def start(msg: Message, state: FSMContext) -> None:
 @router.message(Command("help"))
 async def help_cmd(msg: Message) -> None:
     await msg.answer(texts.WELCOME)
-
-
-@router.message(Command("privacy"))
-async def privacy(msg: Message) -> None:
-    await msg.answer(texts.PRIVACY)
 
 
 @router.message(Command("cancel"))

@@ -13,7 +13,6 @@ EXPECTED_ORDER = [
     # basic
     "start",
     "help_cmd",
-    "privacy",
     "cancel",
     "me",
     "history",
@@ -26,6 +25,9 @@ EXPECTED_ORDER = [
     "paysupport",
     "successful_payment",
     "refund",
+    # privacy
+    "privacy",
+    "delete_me",
     # place
     "city",
     "city_input",
@@ -68,7 +70,7 @@ def test_prashna_router_is_last() -> None:
 def test_register_attaches_all_routers() -> None:
     dp = Dispatcher()
     register(dp)
-    assert [r.name for r in dp.sub_routers] == ["basic", "billing", "place", "prashna"]
+    assert [r.name for r in dp.sub_routers] == ["basic", "billing", "privacy", "place", "prashna"]
 
 
 def test_bot_module_reexports_register() -> None:

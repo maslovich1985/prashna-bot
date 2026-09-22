@@ -665,6 +665,30 @@ def clear_history(user_id: int) -> int:
         return cur.rowcount
 
 
+def delete_user_data(user_id: int) -> dict[str, int]:
+    """Удаляет всё личное. Необратимо; возвращает число удалённых строк по таблицам.
+
+    `entitlements` обнуляется, но строка остаётся надгробием: `trial_used` обязан
+    пережить удаление, иначе `/delete_me` превращается в способ получать пробные
+    заново без конца. Личных данных в надгробии нет — числовой ID и счётчик.
+
+    `payments` не трогаем вовсе: `refundStarPayment` требует `charge_id`, и это
+    ещё и бухгалтерия. Текстов вопросов там нет.
+    """
+    with conn() as c:
+        deleted = {
+            "prashna": c.execute("DELETE FROM prashna WHERE user_id=?", (user_id,)).rowcount,
+            "users": c.execute("DELETE FROM users WHERE user_id=?", (user_id,)).rowcount,
+            "usage": c.execute("DELETE FROM usage WHERE user_id=?", (user_id,)).rowcount,
+        }
+        c.execute(
+            "UPDATE entitlements SET plan = NULL, expires_at = NULL, questions_left = 0, "
+            "updated_at = ? WHERE user_id = ?",
+            (_now(), user_id),
+        )
+    return deleted
+
+
 # ------------------------------- геокэш ----------------------------------- #
 
 
