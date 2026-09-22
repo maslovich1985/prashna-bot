@@ -11,7 +11,10 @@ from aiogram.types import (
 )
 
 from .. import db, geo, texts
+from ..constants import CITIES
 from .billing import BUY_CALLBACK
+
+_CITY_NAMES = {c.name.lower() for c in CITIES.values()}
 
 
 class Form(StatesGroup):
@@ -55,3 +58,26 @@ def buy_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text=texts.BALANCE_BUY_BUTTON, callback_data=BUY_CALLBACK)]
         ]
     )
+
+
+def looks_like_city(text: str) -> bool:
+    """Похоже ли сообщение на название города, а не на вопрос.
+
+    Нужно после рестарта: `MemoryStorage` теряет `waiting_city`, и человек,
+    застигнутый на шаге «напишите город», отправляет «Нижний Новгород» — а это
+    уходит в катч-олл, списывает квант и считает карту по случайному дому.
+
+    Признаки грубые намеренно: ошибка в сторону «переспросить» стоит одного
+    лишнего сообщения, ошибка в другую сторону — кванта и неверной карты.
+    """
+    t = text.strip()
+    if len(t) < 4 or "?" in t:
+        return False
+    words = t.split()
+    if len(words) > 3 or len(t) > 40:
+        return False
+    if t.lower() in _CITY_NAMES:
+        return True
+    # Название города пишут с большой буквы и без глаголов; вопрос без вопросительного
+    # знака, из трёх слов и с заглавных — редкость, и переспросить по нему не жалко.
+    return all(w[:1].isupper() for w in words)

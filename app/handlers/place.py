@@ -8,7 +8,7 @@ from aiogram import F, Router
 from aiogram.enums import ChatAction
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, User
 
 from .. import db, geo, texts
 from ..constants import CITIES
@@ -52,19 +52,17 @@ async def city_input(msg: Message, state: FSMContext) -> None:
     await set_city(msg, msg.text.strip(), state)
 
 
-async def set_city(msg: Message, query: str, state: FSMContext) -> None:
+async def set_city(msg: Message, query: str, state: FSMContext, user: User | None = None) -> None:
+    # `user` нужен, когда город приходит из колбэка: `msg` там — сообщение бота,
+    # и `msg.from_user` указывает на самого бота.
+    who = user or msg.from_user
     await msg.bot.send_chat_action(msg.chat.id, ChatAction.TYPING)
     place = await geo.geocode(query)
     if not place:
         await msg.answer(texts.CITY_NOT_FOUND)
         return
     db.upsert_user(
-        msg.from_user.id,
-        msg.from_user.username,
-        place=place.name,
-        lat=place.lat,
-        lon=place.lon,
-        tz=place.tz,
+        who.id, who.username, place=place.name, lat=place.lat, lon=place.lon, tz=place.tz
     )
     await state.clear()
     await msg.answer(
@@ -114,3 +112,38 @@ async def city_chosen(call: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await call.answer()
     await call.message.edit_text(texts.city_set(city.name, city.lat, city.lon, city.tz))
+
+
+PENDING_CITY = "pending:city"
+PENDING_QUESTION = "pending:question"
+
+
+def pending_city_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=texts.PENDING_IS_CITY, callback_data=PENDING_CITY)],
+            [InlineKeyboardButton(text=texts.PENDING_IS_QUESTION, callback_data=PENDING_QUESTION)],
+        ]
+    )
+
+
+@router.callback_query(F.data == PENDING_CITY)
+async def pending_is_city(call: CallbackQuery, state: FSMContext) -> None:
+    pending = (await state.get_data()).get("pending_city")
+    await call.answer()
+    if call.message is None:
+        return
+    await state.clear()
+    if not pending:
+        # Состояние потеряно во второй раз: просим назвать город заново, а не гадаем.
+        await call.message.answer(texts.ASK_CITY, reply_markup=cities_kb())
+        return
+    await set_city(call.message, pending, state, user=call.from_user)
+
+
+@router.callback_query(F.data == PENDING_QUESTION)
+async def pending_is_question(call: CallbackQuery, state: FSMContext) -> None:
+    await call.answer()
+    await state.clear()
+    if call.message is not None:
+        await call.message.answer(texts.PENDING_SEND_AGAIN)

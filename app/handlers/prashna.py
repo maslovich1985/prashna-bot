@@ -23,8 +23,8 @@ from ..astro.prashna import detect_house, judgment_factors, render_chart_text, r
 from ..config import settings
 from ..constants import CONSULT_PRICE_MAX, CONSULT_PRICE_MIN
 from ..geo import Place
-from .common import buy_kb, place_for
-from .place import cities_kb
+from .common import buy_kb, looks_like_city, place_for
+from .place import cities_kb, pending_city_kb
 
 log = logging.getLogger(__name__)
 router = Router(name="prashna")
@@ -56,6 +56,15 @@ def chunks(text: str, size: int) -> Iterator[str]:
 @router.message(F.text & ~F.text.startswith("/"))
 async def prashna(msg: Message, state: FSMContext) -> None:
     question = msg.text.strip()
+
+    # Рестарт бота теряет FSM: человек, застигнутый на шаге «напишите город»,
+    # отправляет название — и оно ушло бы в расчёт как вопрос. Переспрашиваем,
+    # ничего не списывая (F-08).
+    if looks_like_city(question):
+        await state.update_data(pending_city=question)
+        await msg.answer(texts.city_or_question(question), reply_markup=pending_city_kb())
+        return
+
     if len(question) < MIN_QUESTION_LEN:
         await msg.answer(texts.QUESTION_TOO_SHORT)
         return
