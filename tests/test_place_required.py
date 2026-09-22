@@ -24,12 +24,18 @@ def valid_prashna(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Геокодер — под запретом, толкование подменено: карта считается настоящая,
+    а в Groq тесты не ходят."""
+
     async def _boom(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("тест полез в сеть")
 
+    async def _interpret(*args: Any, **kwargs: Any) -> str:
+        return "ТОЛКОВАНИЕ"
+
     monkeypatch.setattr(geo, "geocode", _boom)
-    monkeypatch.setattr(llm, "interpret", _boom)
-    monkeypatch.setattr(prashna_handlers.llm, "interpret", _boom)
+    monkeypatch.setattr(llm, "interpret", _interpret)
+    monkeypatch.setattr(prashna_handlers.llm, "interpret", _interpret)
 
 
 async def test_question_without_place_is_not_calculated(feed, user_id) -> None:
