@@ -75,12 +75,10 @@ async def chart_cmd(msg: Message) -> None:
         await msg.answer(texts.CHART_NOT_FOUND)
         return
     doc = BufferedInputFile(
-        (
-            f"Вопрос: {row['question']}\n\n{row['chart_text']}\n\nТОЛКОВАНИЕ:\n{row['answer']}"
-        ).encode(),
-        filename=f"prashna_{row['id']}.txt",
+        texts.chart_file(row["question"], row["chart_text"], row["answer"]).encode(),
+        filename=texts.chart_filename(row["id"]),
     )
-    await msg.answer_document(doc, caption=f"Прашна #{row['id']}")
+    await msg.answer_document(doc, caption=texts.chart_caption(row["id"]))
 
 
 @router.message(Command("forget"))
