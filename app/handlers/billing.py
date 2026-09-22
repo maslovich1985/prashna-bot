@@ -1,4 +1,4 @@
-"""Оплата звёздами: /subscribe → выбор тарифа → инвойс (D-01)."""
+"""Оплата звёздами: /subscribe → выбор тарифа → инвойс (D-01) → pre-checkout (D-02)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     LabeledPrice,
     Message,
+    PreCheckoutQuery,
 )
 
 from .. import texts
@@ -65,9 +66,27 @@ async def send_invoice(call: CallbackQuery) -> None:
     await call.message.answer_invoice(
         title=plan.title,
         description=texts.plan_description(plan),
-        # payload проверяется по своей БД в pre_checkout (D-02): всё, что пришло
+        # payload возвращается в pre_checkout и там перепроверяется: всё, что пришло
         # от Telegram, считаем недоверенным.
         payload=key,
         currency=CURRENCY,
         prices=[LabeledPrice(label=plan.title, amount=plan.stars)],
     )
+
+
+@router.pre_checkout_query()
+async def pre_checkout(query: PreCheckoutQuery) -> None:
+    """Последняя возможность отказаться от платежа.
+
+    Ответ обязан уйти за 10 секунд, иначе Telegram отменит платёж сам, — поэтому
+    внутри только свои константы: ни Groq, ни геокодера, ни прокси.
+    """
+    plan = _sellable(query.invoice_payload)
+    if plan is None:
+        await query.answer(ok=False, error_message=texts.PLAN_GONE)
+        return
+    # Сумму и валюту присылает Telegram, а не наш инвойс: сверяем с тарифом.
+    if query.currency != CURRENCY or query.total_amount != plan.stars:
+        await query.answer(ok=False, error_message=texts.CHECKOUT_AMOUNT_MISMATCH)
+        return
+    await query.answer(ok=True)

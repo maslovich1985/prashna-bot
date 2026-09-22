@@ -1,12 +1,14 @@
-"""Инвойс звёздами: /subscribe, кнопки тарифов, sendInvoice (D-01)."""
+"""Оплата звёздами: /subscribe, кнопки, sendInvoice (D-01), pre_checkout (D-02)."""
 
 from __future__ import annotations
 
 import dataclasses
+import time
+from typing import Any
 
 import pytest
 
-from app import texts
+from app import geo, llm, texts
 from app.constants import PLANS, Plan
 from app.handlers import billing
 
@@ -82,3 +84,46 @@ async def test_plan_without_price_gets_alert(
     monkeypatch.setattr(billing, "PLANS", {"month": Plan(title="Подписка на месяц", days=30)})
     sent = await feed_callback("plan:month")
     assert not [s for s in sent if s.method == "SendInvoice"]
+
+
+# --- D-02: pre_checkout ---------------------------------------------------- #
+
+
+async def test_pre_checkout_confirms_a_valid_payment(feed_pre_checkout, priced) -> None:
+    sent = await feed_pre_checkout("month", 150)
+    assert [(s.method, s.data["ok"]) for s in sent] == [("AnswerPreCheckoutQuery", True)]
+
+
+async def test_pre_checkout_rejects_unknown_payload(feed_pre_checkout, priced) -> None:
+    sent = await feed_pre_checkout("nope", 150)
+    assert sent[0].data["ok"] is False
+    assert sent[0].data["error_message"] == texts.PLAN_GONE
+
+
+async def test_pre_checkout_rejects_wrong_amount(feed_pre_checkout, priced) -> None:
+    # Сумму присылает Telegram, а не наш инвойс: расхождение с тарифом — отказ.
+    sent = await feed_pre_checkout("month", 1)
+    assert sent[0].data["ok"] is False
+    assert sent[0].data["error_message"] == texts.CHECKOUT_AMOUNT_MISMATCH
+
+
+async def test_pre_checkout_rejects_other_currency(feed_pre_checkout, priced) -> None:
+    sent = await feed_pre_checkout("month", 150, currency="RUB")
+    assert sent[0].data["ok"] is False
+
+
+async def test_pre_checkout_touches_no_external_service(
+    feed_pre_checkout, priced, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ответ обязан уйти за 10 секунд, поэтому ни Groq, ни геокодера внутри быть не может."""
+
+    async def _boom(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("pre_checkout полез в сеть")
+
+    monkeypatch.setattr(geo, "geocode", _boom)
+    monkeypatch.setattr(llm, "interpret", _boom)
+
+    started = time.monotonic()
+    sent = await feed_pre_checkout("month", 150)
+    assert sent[0].data["ok"] is True
+    assert time.monotonic() - started < 1.0
