@@ -11,13 +11,42 @@ from datetime import datetime
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, Message
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from .. import db, texts
 from ..config import settings
 from .common import main_kb, place_for
 
 router = Router(name="basic")
+
+HELP_PREFIX = "help:"
+
+# Экран → текст. Ключ уезжает в callback_data, поэтому он короткий и латиницей.
+HELP_SCREENS = {"what": texts.HELP_WHAT, "how": texts.HELP_HOW, "pay": texts.HELP_PAY}
+
+
+def help_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=texts.HELP_BTN_WHAT, callback_data=f"{HELP_PREFIX}what")],
+            [InlineKeyboardButton(text=texts.HELP_BTN_HOW, callback_data=f"{HELP_PREFIX}how")],
+            [InlineKeyboardButton(text=texts.HELP_BTN_PAY, callback_data=f"{HELP_PREFIX}pay")],
+        ]
+    )
+
+
+def help_back_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=texts.HELP_BTN_BACK, callback_data=f"{HELP_PREFIX}menu")]
+        ]
+    )
 
 
 @router.message(CommandStart())
@@ -29,7 +58,24 @@ async def start(msg: Message, state: FSMContext) -> None:
 
 @router.message(Command("help"))
 async def help_cmd(msg: Message) -> None:
-    await msg.answer(texts.WELCOME, reply_markup=main_kb())
+    await msg.answer(texts.HELP_MENU, reply_markup=help_menu_kb())
+
+
+@router.callback_query(F.data.startswith(HELP_PREFIX))
+async def help_screen(call: CallbackQuery) -> None:
+    key = (call.data or "").removeprefix(HELP_PREFIX)
+    await call.answer()
+    if call.message is None:
+        return
+    if key == "menu":
+        await call.message.edit_text(texts.HELP_MENU, reply_markup=help_menu_kb())
+        return
+    screen = HELP_SCREENS.get(key)
+    if screen is None:
+        # Кнопка из старого сообщения, экран успели переименовать.
+        await call.message.edit_text(texts.HELP_MENU, reply_markup=help_menu_kb())
+        return
+    await call.message.edit_text(screen, reply_markup=help_back_kb())
 
 
 @router.message(Command("cancel"))

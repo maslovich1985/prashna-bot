@@ -56,9 +56,9 @@ async def test_start_greets_and_registers_user(feed, no_network) -> None:
     assert db.get_user(USER_ID) is not None
 
 
-async def test_help_returns_welcome(feed, no_network) -> None:
+async def test_help_opens_the_menu(feed, no_network) -> None:
     sent = await feed("/help")
-    assert [s.text for s in sent] == [texts.WELCOME]
+    assert [s.text for s in sent] == [texts.HELP_MENU]
 
 
 async def test_city_with_argument_sets_place(feed, monkeypatch: pytest.MonkeyPatch) -> None:
