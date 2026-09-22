@@ -30,8 +30,8 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _boom(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("тест полез в сеть")
 
-    async def _interpret(*args: Any, **kwargs: Any) -> str:
-        return "ТОЛКОВАНИЕ"
+    async def _interpret(*args: Any, **kwargs: Any) -> llm.Answer:
+        return llm.Answer(text="ТОЛКОВАНИЕ")
 
     monkeypatch.setattr(geo, "geocode", _boom)
     monkeypatch.setattr(llm, "interpret", _interpret)
