@@ -8,10 +8,10 @@ from aiogram import F, Router
 from aiogram.enums import ChatAction
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, ReplyKeyboardRemove
+from aiogram.types import Message
 
 from .. import db, geo, texts
-from .common import Form, location_kb
+from .common import Form, location_kb, main_kb
 
 router = Router(name="place")
 
@@ -48,7 +48,7 @@ async def set_city(msg: Message, query: str, state: FSMContext) -> None:
     await state.clear()
     await msg.answer(
         texts.city_set(html.escape(place.name), place.lat, place.lon, place.tz),
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=main_kb(),
     )
 
 
@@ -64,6 +64,4 @@ async def location(msg: Message, state: FSMContext) -> None:
         tz=place.tz,
     )
     await state.clear()
-    await msg.answer(
-        texts.location_set(place.lat, place.lon, place.tz), reply_markup=ReplyKeyboardRemove()
-    )
+    await msg.answer(texts.location_set(place.lat, place.lon, place.tz), reply_markup=main_kb())

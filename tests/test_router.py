@@ -19,6 +19,10 @@ EXPECTED_ORDER = [
     "chart_cmd",
     "forget",
     "stats",
+    "ask_button",
+    "balance_button",
+    "history_button",
+    "help_button",
     # billing
     "subscribe",
     "terms",

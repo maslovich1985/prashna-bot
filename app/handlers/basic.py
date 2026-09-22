@@ -8,14 +8,14 @@ from __future__ import annotations
 import html
 from datetime import datetime
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, Message, ReplyKeyboardRemove
+from aiogram.types import BufferedInputFile, Message
 
 from .. import db, texts
 from ..config import settings
-from .common import location_kb, place_for
+from .common import main_kb, place_for
 
 router = Router(name="basic")
 
@@ -24,18 +24,18 @@ router = Router(name="basic")
 async def start(msg: Message, state: FSMContext) -> None:
     await state.clear()
     db.upsert_user(msg.from_user.id, msg.from_user.username)
-    await msg.answer(texts.WELCOME, reply_markup=location_kb())
+    await msg.answer(texts.WELCOME, reply_markup=main_kb())
 
 
 @router.message(Command("help"))
 async def help_cmd(msg: Message) -> None:
-    await msg.answer(texts.WELCOME)
+    await msg.answer(texts.WELCOME, reply_markup=main_kb())
 
 
 @router.message(Command("cancel"))
 async def cancel(msg: Message, state: FSMContext) -> None:
     await state.clear()
-    await msg.answer(texts.CANCELLED, reply_markup=ReplyKeyboardRemove())
+    await msg.answer(texts.CANCELLED, reply_markup=main_kb())
 
 
 @router.message(Command("me"))
@@ -95,3 +95,32 @@ async def stats(msg: Message) -> None:
         return
     s = db.stats()
     await msg.answer("\n".join(f"{k}: {v}" for k, v in s.items()))
+
+
+# Кнопки постоянной клавиатуры приходят обычным текстом, поэтому ловим их здесь —
+# до catch-all прашны, который принял бы подпись кнопки за вопрос. Состояние
+# чистим: нажатие кнопки посреди ввода города означает, что ввод брошен.
+
+
+@router.message(F.text == texts.BTN_ASK)
+async def ask_button(msg: Message, state: FSMContext) -> None:
+    await state.clear()
+    await msg.answer(texts.ASK_PROMPT, reply_markup=main_kb())
+
+
+@router.message(F.text == texts.BTN_BALANCE)
+async def balance_button(msg: Message, state: FSMContext) -> None:
+    await state.clear()
+    await me(msg)
+
+
+@router.message(F.text == texts.BTN_HISTORY)
+async def history_button(msg: Message, state: FSMContext) -> None:
+    await state.clear()
+    await history(msg)
+
+
+@router.message(F.text == texts.BTN_HELP)
+async def help_button(msg: Message, state: FSMContext) -> None:
+    await state.clear()
+    await help_cmd(msg)

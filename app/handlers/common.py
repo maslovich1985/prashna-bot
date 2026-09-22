@@ -12,6 +12,19 @@ class Form(StatesGroup):
     waiting_city = State()
 
 
+def main_kb() -> ReplyKeyboardMarkup:
+    """Постоянная навигация. Держится между сообщениями: `one_time_keyboard` здесь
+    оставил бы пользователя с пустым экраном после первого же ответа."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=texts.BTN_ASK), KeyboardButton(text=texts.BTN_BALANCE)],
+            [KeyboardButton(text=texts.BTN_HISTORY), KeyboardButton(text=texts.BTN_HELP)],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
+
 def location_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=texts.LOCATION_BUTTON, request_location=True)]],
