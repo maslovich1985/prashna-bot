@@ -77,6 +77,8 @@ def place_from_coords(lat: float, lon: float, name: str | None = None) -> Place:
 
 
 def default_place() -> Place:
+    """Место из `DEFAULT_*` — только для админских прогонов и astro-проверки из README.
+    В пользовательском пути не используется: там место обязательно своё (F-07)."""
     return Place(
         settings.default_city, settings.default_lat, settings.default_lon, settings.default_tz
     )

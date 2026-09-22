@@ -91,6 +91,9 @@ async def me(msg: Message) -> None:
     place = await place_for(msg.from_user.id)
     ent = db.entitlement_for(msg.from_user.id)
     left: object = texts.UNLIMITED if ent.unlimited else ent.left
+    if place is None:
+        await msg.answer(texts.profile_without_place(left, settings.ayanamsa))
+        return
     await msg.answer(
         texts.profile(
             html.escape(place.name), place.lat, place.lon, place.tz, left, settings.ayanamsa

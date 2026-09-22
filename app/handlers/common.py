@@ -39,11 +39,13 @@ def location_kb() -> ReplyKeyboardMarkup:
     )
 
 
-async def place_for(user_id: int) -> geo.Place:
+async def place_for(user_id: int) -> geo.Place | None:
+    """Сохранённое место или `None`. Подставлять умолчание здесь нельзя: место
+    определяет лагну, то есть ответ, и молчаливая Москва — это брак расчёта."""
     u = db.get_user(user_id)
     if u and u.get("lat") is not None and u.get("lon") is not None:
         return geo.Place(u.get("place") or "—", u["lat"], u["lon"], u.get("tz") or "UTC")
-    return geo.default_place()
+    return None
 
 
 def buy_kb() -> InlineKeyboardMarkup:

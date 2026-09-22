@@ -27,6 +27,11 @@ TOMSK = geo.Place("Томск", 56.5, 84.97, "Asia/Tomsk")
 
 
 @pytest.fixture(autouse=True)
+def place_is_set(with_place) -> None:
+    """Прашна-путь требует места (F-07). Тесты про его отсутствие чистят users сами."""
+
+
+@pytest.fixture(autouse=True)
 def valid_prashna(monkeypatch: pytest.MonkeyPatch) -> None:
     """Валидность считается по небу на момент прогона, и примерно в 15% моментов
     карта отказная (§5.5.1). Без этой фиксации тесты пути падали бы через раз;
@@ -78,6 +83,7 @@ async def test_city_not_found_keeps_place_unset(feed, monkeypatch: pytest.Monkey
         return None
 
     monkeypatch.setattr(geo, "geocode", fake_geocode)
+    db.delete_user_data(USER_ID)
     sent = await feed("/city Блаблабла")
     assert sent[-1].text == texts.CITY_NOT_FOUND
     assert db.get_user(USER_ID) is None
@@ -104,9 +110,9 @@ async def test_location_sets_place(feed, no_network) -> None:
     assert db.get_user(USER_ID)["tz"] == "Asia/Tomsk"
 
 
-async def test_me_shows_default_place_and_limit(feed, no_network) -> None:
+async def test_me_shows_place_and_limit(feed, no_network) -> None:
     sent = await feed("/me")
-    assert settings.default_city in sent[-1].text
+    assert "Томск" in sent[-1].text
     assert str(settings.daily_limit) in sent[-1].text
 
 

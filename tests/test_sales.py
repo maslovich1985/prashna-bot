@@ -14,6 +14,11 @@ from app.handlers import prashna as prashna_handlers
 
 
 @pytest.fixture(autouse=True)
+def place_is_set(with_place) -> None:
+    """Прашна-путь требует сохранённого места (F-07)."""
+
+
+@pytest.fixture(autouse=True)
 def valid_prashna(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         prashna_handlers, "_validity_of", lambda *args, **kwargs: validity.Verdict()
