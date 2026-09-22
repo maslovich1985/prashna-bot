@@ -47,10 +47,12 @@ async def test_ask_button_prompts_instead_of_asking(feed) -> None:
     assert db.history(777, 10) == []
 
 
-async def test_balance_button_matches_me(feed) -> None:
+async def test_balance_button_opens_the_balance_screen(feed) -> None:
+    # Баланс и /me разошлись в F-05: первый про доступ, второй про настройки расчёта.
     from_button = await feed(texts.BTN_BALANCE)
     from_command = await feed("/me")
-    assert from_button[0].text == from_command[0].text
+    assert from_button[0].text != from_command[0].text
+    assert "Баланс" in from_button[0].text
 
 
 async def test_history_button_matches_history(feed) -> None:

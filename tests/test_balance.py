@@ -9,7 +9,6 @@ from typing import Any
 import pytest
 
 from app import db, geo, llm, texts
-from app.config import settings
 from app.constants import TRIAL_QUESTIONS
 from app.handlers import basic
 
@@ -71,7 +70,7 @@ async def test_exhausted_trials_offer_access(feed, user_id) -> None:
 
 
 async def test_admin_sees_unlimited(feed, user_id, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(db, "settings", dataclasses.replace(settings, admin_ids=(user_id,)))
+    monkeypatch.setattr(db, "settings", dataclasses.replace(db.settings, admin_ids=(user_id,)))
     sent = await feed(texts.BTN_BALANCE)
     assert sent[0].text == _expected(user_id)
 
