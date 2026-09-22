@@ -30,6 +30,13 @@ class Settings:
     groq_max_tokens: int = _int("GROQ_MAX_TOKENS", 1800)
     # HTTPS-прокси для запросов к LLM, например http://user:pass@1.2.3.4:8080
     llm_proxy: str = os.getenv("LLM_PROXY", "")
+    # Запасной адрес: ретраи бьют в тот же прокси и от его падения не спасают.
+    llm_proxy_fallback: str = os.getenv("LLM_PROXY_FALLBACK", "")
+    # Таймаут через прокси держим меньше GROQ_TIMEOUT, чтобы успеть переключиться
+    # на запасной адрес, а не ждать всё окно на первом.
+    llm_proxy_timeout: int = _int("LLM_PROXY_TIMEOUT", 55)
+    # Через сколько секунд ожидания предупредить пользователя, что ответ идёт дольше обычного.
+    llm_slow_notice: int = _int("LLM_SLOW_NOTICE", 25)
 
     db_path: Path = Path(os.getenv("DB_PATH", str(BASE_DIR / "data" / "prashna.sqlite3")))
     log_level: str = os.getenv("LOG_LEVEL", "INFO")

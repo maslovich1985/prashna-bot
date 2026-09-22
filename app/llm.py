@@ -78,6 +78,24 @@ class Answer:
     truncated: bool = False
 
 
+def proxy_chain() -> list[str | None]:
+    """Адреса, через которые пробуем ходить, по порядку.
+
+    Ретраи бьют в тот же адрес и от упавшего прокси не спасают — поэтому список,
+    а не один адрес. Пусто = идём напрямую.
+    """
+    chain: list[str | None] = [p for p in (settings.llm_proxy, settings.llm_proxy_fallback) if p]
+    return chain or [None]
+
+
+def timeout_for(proxy: str | None) -> float:
+    """Таймаут запроса. Через прокси он короче `GROQ_TIMEOUT`: смысл в том, чтобы
+    успеть переключиться на запасной адрес, а не ждать всё окно на первом."""
+    if proxy is None:
+        return float(settings.groq_timeout)
+    return float(min(settings.llm_proxy_timeout, settings.groq_timeout))
+
+
 def build_user_prompt(
     question: str, house: int, house_meaning: str, chart_text: str, factors: list[str]
 ) -> str:
@@ -120,11 +138,13 @@ async def interpret(
     last_err: Exception | None = None
     rate_limited = False
     timed_out = False
+    chain = proxy_chain()
     for attempt in range(retries):
+        # Внутри попытки перебираем адреса: упавший прокси должен стоить одного
+        # запроса, а не всех трёх.
+        proxy = chain[attempt % len(chain)]
         try:
-            async with httpx.AsyncClient(
-                timeout=settings.groq_timeout, proxy=settings.llm_proxy or None
-            ) as client:
+            async with httpx.AsyncClient(timeout=timeout_for(proxy), proxy=proxy) as client:
                 r = await client.post(url, json=payload, headers=headers)
             if r.status_code in (401, 403):
                 # Ключ сам не починится: ретраи только жгут время пользователя.
@@ -142,19 +162,32 @@ async def interpret(
         except httpx.TimeoutException as e:
             timed_out = True
             last_err = e
-            log.warning("Таймаут Groq (попытка %d)", attempt + 1)
-            await asyncio.sleep(2 * (attempt + 1))
+            log.warning("Таймаут через %s (попытка %d)", proxy or "прямое соединение", attempt + 1)
+            await _backoff(attempt, chain)
         except Exception as e:
             timed_out = False
             last_err = e
-            log.warning("Ошибка запроса к Groq (попытка %d): %s", attempt + 1, e)
-            await asyncio.sleep(2 * (attempt + 1))
+            log.warning(
+                "Ошибка запроса через %s (попытка %d): %s",
+                proxy or "прямое соединение",
+                attempt + 1,
+                e,
+            )
+            await _backoff(attempt, chain)
 
     if timed_out:
         raise LLMTimeout(f"Groq не ответил вовремя: {last_err}")
     if rate_limited and last_err is None:
         raise LLMRateLimited("Groq вернул 429 на всех попытках")
     raise LLMUnavailable(f"Groq недоступен: {last_err}")
+
+
+async def _backoff(attempt: int, chain: list[str | None]) -> None:
+    """Пауза перед следующей попыткой. Если следующий адрес другой, ждать нечего:
+    паузу имеет смысл держать только перед повтором в тот же адрес."""
+    if len(chain) > 1:
+        return
+    await asyncio.sleep(2 * (attempt + 1))
 
 
 def _parse(data: dict) -> Answer:

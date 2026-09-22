@@ -263,6 +263,9 @@ journalctl --vacuum-size=200M
 | `DEFAULT_CITY` / `DEFAULT_LAT` / `DEFAULT_LON` / `DEFAULT_TZ` | Москва | Место, если пользователь не задал своё |
 | `GEOCODER_URL` | Nominatim | Можно заменить на свой инстанс Nominatim |
 | `GEOCODER_UA` | — | User-Agent с контактом — требование Nominatim |
+| `LLM_PROXY_FALLBACK` | — | Запасной прокси: ретраи бьют в тот же адрес и от падения первого не спасают |
+| `LLM_PROXY_TIMEOUT` | `55` | Таймаут через прокси, секунд. Меньше `GROQ_TIMEOUT`, иначе переключаться некогда |
+| `LLM_SLOW_NOTICE` | `25` | Через сколько секунд предупредить, что ответ идёт дольше обычного |
 | `AYANAMSA` | `LAHIRI` | `LAHIRI`, `RAMAN`, `KRISHNAMURTI`, `YUKTESHWAR`, `TRUE_CITRA` |
 
 ---
