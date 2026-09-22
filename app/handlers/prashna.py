@@ -125,6 +125,18 @@ async def prashna(msg: Message, state: FSMContext) -> None:
             db.release(res)
 
 
+async def _warn_if_slow(msg: Message) -> None:
+    """Предупреждает, что ответ идёт дольше обычного. Молчание в эти секунды
+    выглядит как зависший бот, а запрос может идти через запасной прокси."""
+    try:
+        await asyncio.sleep(settings.llm_slow_notice)
+        await msg.answer(texts.LLM_SLOW)
+    except asyncio.CancelledError:
+        raise
+    except TelegramAPIError:
+        log.warning("Не удалось отправить предупреждение о долгом ответе")
+
+
 async def _notify_referrer(msg: Message, referrer_id: int) -> None:
     """Сообщает пригласившему о бонусе. Ни имени, ни id приглашённого: он не давал
     согласия на раскрытие того, что обращался к астрологическому боту."""
@@ -217,6 +229,7 @@ async def _answer(msg: Message, question: str, place: Place) -> bool:
         return False
 
     await msg.bot.send_chat_action(msg.chat.id, ChatAction.TYPING)
+    slow = asyncio.create_task(_warn_if_slow(msg))
     try:
         answer = await llm.interpret(question, house, C.HOUSE_MEANINGS[house], chart_text, factors)
     except llm.LLMError as e:
@@ -229,6 +242,8 @@ async def _answer(msg: Message, question: str, place: Place) -> bool:
             log.error("LLM: %s", e)
         await msg.answer(LLM_FAILURE_TEXTS.get(type(e), texts.LLM_UNAVAILABLE))
         return False
+    finally:
+        slow.cancel()
 
     pid = db.save_prashna(
         msg.from_user.id,
