@@ -14,7 +14,7 @@ from typing import Any
 
 from . import texts
 from .config import settings
-from .constants import PLANS, TRIAL_QUESTIONS
+from .constants import PLANS, REFERRAL_BONUS, REFERRAL_MAX, TRIAL_QUESTIONS
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +96,17 @@ CREATE TABLE IF NOT EXISTS payments (
     refunded_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, paid_at DESC);
+
+-- Выплаченные реферальные бонусы (G-02). Отдельная таблица, а не только флаг в
+-- users: /delete_me стирает строку пользователя, и без этой записи удаление стало
+-- бы способом приносить пригласившему бонус снова и снова. Личных данных нет —
+-- два числовых id и дата.
+CREATE TABLE IF NOT EXISTS referral_payouts (
+    invitee_id  INTEGER PRIMARY KEY,
+    referrer_id INTEGER NOT NULL,
+    paid_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_referral_payouts ON referral_payouts(referrer_id);
 """
 
 
@@ -195,6 +206,16 @@ CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, paid_at DESC);
     # 5 → 6: рефералка (G-01). Колонки добавляются пустыми, прошлая версия кода
     # их просто не читает.
     _add_referral_columns,
+    # 6 → 7: журнал выплаченных бонусов (G-02). Переживает /delete_me — иначе
+    # удаление и повторный заход по ссылке приносят бонус второй раз.
+    """
+CREATE TABLE IF NOT EXISTS referral_payouts (
+    invitee_id  INTEGER PRIMARY KEY,
+    referrer_id INTEGER NOT NULL,
+    paid_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_referral_payouts ON referral_payouts(referrer_id);
+""",
 ]
 
 
@@ -485,18 +506,72 @@ def note_reject(user_id: int) -> int:
     return int(row["rejects"])
 
 
-def commit(res: Reservation) -> None:
+def _pay_referral(c: sqlite3.Connection, user_id: int) -> int | None:
+    """Начисляет бонус пригласившему за первый вопрос приглашённого.
+
+    Вызывается внутри транзакции `commit`: бонус и отметка «оплачено» должны
+    появиться вместе с закрытием резерва, иначе сбой между ними даёт либо
+    двойное начисление, либо потерянное.
+
+    Бонус кладётся в `questions_left`, а не в `trial_used`: пробные обнуляются
+    при `/delete_me`, а купленное и заработанное — нет, и в отчётах это разные
+    сущности. Приглашённому бонус не даём: у него и так есть пробные, иначе
+    «пригласил сам себя вторым аккаунтом» выгодно вдвойне.
+    """
+    row = c.execute(
+        "SELECT referrer_id, referral_paid FROM users WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    if row is None or row["referrer_id"] is None or row["referral_paid"]:
+        return None
+
+    referrer_id = int(row["referrer_id"])
+    # Журнал переживает /delete_me, флаг в users — нет. Без этой проверки удаление
+    # и повторный заход по ссылке приносили бы бонус снова.
+    if (
+        c.execute("SELECT 1 FROM referral_payouts WHERE invitee_id = ?", (user_id,)).fetchone()
+        is not None
+    ):
+        return None
+
+    paid = c.execute(
+        "SELECT COUNT(*) AS n FROM referral_payouts WHERE referrer_id = ?", (referrer_id,)
+    ).fetchone()["n"]
+    if paid >= REFERRAL_MAX:
+        # Потолок: без него это ферма мультиаккаунтов — регистрация в Telegram
+        # дешевле двух вопросов. Отметку не ставим: лимит может вырасти.
+        return None
+
+    c.execute(
+        "UPDATE users SET referral_paid = 1, updated_at = ? WHERE user_id = ?", (_now(), user_id)
+    )
+    c.execute(
+        "INSERT INTO entitlements (user_id, questions_left, updated_at) VALUES (?,?,?) "
+        "ON CONFLICT(user_id) DO UPDATE SET "
+        "questions_left = entitlements.questions_left + excluded.questions_left, "
+        "updated_at = excluded.updated_at",
+        (referrer_id, REFERRAL_BONUS, _now()),
+    )
+    return referrer_id
+
+
+def commit(res: Reservation) -> int | None:
     """Закрепляет резерв: квант списан ещё в `reserve`, здесь снимается пометка.
 
     Без неё рестарт-сборщик (`release_stale`) вернул бы уже отработанный вопрос.
+    Возвращает id пригласившего, если этим вопросом заработан бонус (G-02), —
+    его нужно уведомить (G-03).
     """
-    if res.source == "admin":
-        return
     with conn() as c:
-        c.execute(
-            "UPDATE usage SET reserved_at = NULL, reserved_src = NULL WHERE user_id=? AND day=?",
-            (res.user_id, res.day),
-        )
+        # Бонус считаем и для админа: пригласивший не виноват, что его друг
+        # оказался админом бота.
+        referrer_id = _pay_referral(c, res.user_id)
+        if res.source != "admin":
+            c.execute(
+                "UPDATE usage SET reserved_at = NULL, reserved_src = NULL "
+                "WHERE user_id=? AND day=?",
+                (res.user_id, res.day),
+            )
+    return referrer_id
 
 
 def release(res: Reservation) -> None:
@@ -721,7 +796,8 @@ def delete_user_data(user_id: int) -> dict[str, int]:
     заново без конца. Личных данных в надгробии нет — числовой ID и счётчик.
 
     `payments` не трогаем вовсе: `refundStarPayment` требует `charge_id`, и это
-    ещё и бухгалтерия. Текстов вопросов там нет.
+    ещё и бухгалтерия. `referral_payouts` — тоже: без него удаление становится
+    способом приносить пригласившему бонус снова. Текстов вопросов там нет.
     """
     with conn() as c:
         deleted = {
