@@ -25,6 +25,8 @@ BOT_COMMANDS = [
     BotCommand(command="history", description="Последние вопросы"),
     BotCommand(command="forget", description="Очистить историю"),
     BotCommand(command="privacy", description="Что хранится и кому передаётся"),
+    BotCommand(command="terms", description="Что продаётся и как с возвратом"),
+    BotCommand(command="paysupport", description="Поддержка по платежам"),
 ]
 
 __all__ = ["register", "run"]

@@ -16,6 +16,7 @@ from aiogram.types import (
 )
 
 from .. import alerts, db, texts
+from ..config import settings
 from ..constants import PLANS, Plan
 
 log = logging.getLogger(__name__)
@@ -56,6 +57,16 @@ async def subscribe(msg: Message) -> None:
         await msg.answer(texts.SALES_CLOSED)
         return
     await msg.answer(texts.SUBSCRIBE_HEADER, reply_markup=kb)
+
+
+@router.message(Command("terms"))
+async def terms(msg: Message) -> None:
+    await msg.answer(texts.TERMS)
+
+
+@router.message(Command("paysupport"))
+async def paysupport(msg: Message) -> None:
+    await msg.answer(texts.paysupport(settings.support_contact))
 
 
 @router.callback_query(F.data.startswith(CALLBACK_PREFIX))
