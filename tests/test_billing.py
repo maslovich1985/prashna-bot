@@ -23,8 +23,9 @@ def priced(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _buttons(sent) -> list[tuple[str, str]]:
-    kb = sent.data["reply_markup"].inline_keyboard
-    return [(b.text, b.callback_data) for row in kb for b in row]
+    # Стаб сессии отдаёт вызов через model_dump, поэтому клавиатура — словари, не модели.
+    kb = sent.data["reply_markup"]["inline_keyboard"]
+    return [(b["text"], b["callback_data"]) for row in kb for b in row]
 
 
 async def test_subscribe_without_prices_refuses(feed) -> None:
