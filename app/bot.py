@@ -16,14 +16,17 @@ from .handlers import register
 
 log = logging.getLogger(__name__)
 
-# Синее меню команд в Telegram. Полный разбор справки — F-01; здесь список ровно
-# из того, что хэндлеры уже умеют, плюс /privacy (E-01).
+# Синее меню команд в Telegram. Здесь всё, что пользователь может вызвать сам.
+# Намеренно не в меню: /refund и /stats — админские, /subscribe — продажи закрыты,
+# пока не проставлены цены (§15.1); добавить вместе с ними.
 BOT_COMMANDS = [
     BotCommand(command="help", description="Справка"),
     BotCommand(command="city", description="Задать место, откуда спрашиваете"),
     BotCommand(command="me", description="Мои настройки и остаток"),
     BotCommand(command="history", description="Последние вопросы"),
+    BotCommand(command="chart", description="Карта и ответ по номеру из истории"),
     BotCommand(command="forget", description="Очистить историю вопросов"),
+    BotCommand(command="cancel", description="Отменить текущий ввод"),
     BotCommand(command="privacy", description="Что хранится и кому передаётся"),
     BotCommand(command="delete_me", description="Удалить все мои данные"),
     BotCommand(command="terms", description="Что продаётся и как с возвратом"),

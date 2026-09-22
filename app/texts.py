@@ -380,3 +380,16 @@ def delete_me_done(prashna: int) -> str:
         "об этом предупреждали в /privacy.\n\n"
         "Чтобы начать заново, отправьте /start."
     )
+
+
+def chart_file(question: str, chart_text: str, answer: str) -> str:
+    """Содержимое выгрузки по /chart. Файл читают вне Telegram — разметки в нём нет."""
+    return f"Вопрос: {question}\n\n{chart_text}\n\nТОЛКОВАНИЕ:\n{answer}"
+
+
+def chart_filename(pid: int) -> str:
+    return f"prashna_{pid}.txt"
+
+
+def chart_caption(pid: int) -> str:
+    return f"Прашна #{pid}"
