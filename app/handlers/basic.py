@@ -51,9 +51,26 @@ def help_back_kb() -> InlineKeyboardMarkup:
     )
 
 
+REFERRAL_PREFIX = "ref"
+
+
+def referrer_from(payload: str) -> int | None:
+    """`?start=ref<user_id>` → id пригласившего. Мусор в ссылке — не ошибка, а просто None."""
+    rest = payload.strip().removeprefix(REFERRAL_PREFIX)
+    if rest == payload.strip() or not rest.isdigit():
+        return None
+    return int(rest)
+
+
 @router.message(CommandStart())
 async def start(msg: Message, state: FSMContext) -> None:
     await state.clear()
+    # Реферала записываем до upsert: он пишется только новому пользователю, а
+    # upsert создал бы строку и сделал бы его «знакомым».
+    payload = (msg.text or "").partition(" ")[2]
+    referrer = referrer_from(payload) if payload else None
+    if referrer is not None:
+        db.note_referral(msg.from_user.id, referrer)
     db.upsert_user(msg.from_user.id, msg.from_user.username)
     await msg.answer(texts.WELCOME, reply_markup=main_kb())
 
