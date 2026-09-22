@@ -71,11 +71,33 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Настройка SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
+          SSH_HOST_FINGERPRINT: ${{ secrets.SSH_HOST_FINGERPRINT }}
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -p "${{ secrets.SSH_PORT || 22 }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+
+          # Ключ снимается один раз: сверяем и кладём в known_hosts один и тот же ответ,
+          # иначе между проверкой и rsync остаётся окно на подмену.
+          ssh-keyscan -t ed25519 -p "$SSH_PORT" "$SSH_HOST" > /tmp/hostkey.pub
+          test -s /tmp/hostkey.pub
+          actual="$(ssh-keygen -lf /tmp/hostkey.pub | awk '{print $2}')"
+
+          if [ -z "${SSH_HOST_FINGERPRINT:-}" ]; then
+            echo "::warning::SSH_HOST_FINGERPRINT не задан — ключ хоста не сверяется. Сейчас: $actual"
+          elif [ "$actual" != "$SSH_HOST_FINGERPRINT" ]; then
+            echo "::error::Ключ хоста $SSH_HOST не совпал с SSH_HOST_FINGERPRINT."
+            echo "Ожидался: $SSH_HOST_FINGERPRINT"
+            echo "Получен:  $actual"
+            exit 1
+          fi
+
+          cat /tmp/hostkey.pub >> ~/.ssh/known_hosts
 
       - name: Загрузка кода на сервер
         run: |
