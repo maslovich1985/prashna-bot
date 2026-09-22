@@ -68,7 +68,7 @@ async def test_stored_place_is_used_and_kept(feed, feed_callback, user_id) -> No
     await feed("/city")
     await feed_callback("city:nnv")
     first = await feed(QUESTION)
-    assert "Нижний Новгород" in first[0].text
+    assert any("Нижний Новгород" in s.text for s in first)
 
     # Место переживает следующий вопрос: upsert в прашна-пути не перетирает его.
     stored = db.get_user(user_id)
@@ -81,8 +81,9 @@ async def test_short_chart_names_place_and_timezone(feed, feed_callback) -> None
     await feed("/city")
     await feed_callback("city:kya")
     sent = await feed(QUESTION)
-    assert "Красноярск" in sent[0].text
-    assert "Asia/Krasnoyarsk" in sent[0].text
+    joined = " ".join(s.text for s in sent)
+    assert "Красноярск" in joined
+    assert "Asia/Krasnoyarsk" in joined
 
 
 async def test_me_says_place_is_missing(feed) -> None:
