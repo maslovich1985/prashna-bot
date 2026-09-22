@@ -1,6 +1,8 @@
-"""Оплата звёздами: /subscribe → выбор тарифа → инвойс (D-01) → pre-checkout (D-02)."""
+"""Оплата звёздами: /subscribe → инвойс (D-01) → pre-checkout (D-02) → выдача (D-03)."""
 
 from __future__ import annotations
+
+import logging
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -13,8 +15,10 @@ from aiogram.types import (
     PreCheckoutQuery,
 )
 
-from .. import texts
+from .. import alerts, db, texts
 from ..constants import PLANS, Plan
+
+log = logging.getLogger(__name__)
 
 router = Router(name="billing")
 
@@ -90,3 +94,32 @@ async def pre_checkout(query: PreCheckoutQuery) -> None:
         await query.answer(ok=False, error_message=texts.CHECKOUT_AMOUNT_MISMATCH)
         return
     await query.answer(ok=True)
+
+
+@router.message(F.successful_payment)
+async def successful_payment(msg: Message) -> None:
+    """Деньги уже списаны: наша задача — выдать доступ ровно один раз."""
+    payment = msg.successful_payment
+    charge_id = payment.telegram_payment_charge_id
+    plan = PLANS.get(payment.invoice_payload)
+    if plan is None:
+        # Досюда доходит только то, что пропустил pre_checkout, но деньги уже
+        # списаны — молчать нельзя ни перед пользователем, ни перед админом.
+        log.error("Оплачен неизвестный тариф %s, charge_id=%s", payment.invoice_payload, charge_id)
+        await alerts.notify(
+            msg.bot,
+            f"payment:{charge_id}",
+            texts.alert_unknown_plan(msg.from_user.id, payment.invoice_payload, charge_id),
+        )
+        await msg.answer(texts.payment_needs_support(charge_id))
+        return
+
+    granted = db.grant(msg.from_user.id, charge_id, payment.invoice_payload, payment.total_amount)
+    if not granted:
+        # Повторная доставка того же платежа: доступ уже выдан, второй раз не выдаём
+        # и вторым сообщением не поздравляем.
+        log.info("Повторный successful_payment, charge_id=%s", charge_id)
+        return
+
+    ent = db.entitlement_for(msg.from_user.id)
+    await msg.answer(texts.payment_done(plan, ent))

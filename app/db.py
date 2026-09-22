@@ -500,6 +500,62 @@ def release_stale(now: datetime | None = None) -> int:
     return len(rows)
 
 
+# ------------------------------ выдача доступа ----------------------------- #
+
+
+def grant(
+    user_id: int, charge_id: str, plan_key: str, stars: int, now: datetime | None = None
+) -> bool:
+    """Записывает платёж и выдаёт доступ одной транзакцией. `False` — повтор.
+
+    Telegram присылает `successful_payment` заново при ретраях и рестарте бота,
+    поэтому дубль по `charge_id` — не ошибка, а ожидаемый случай: выходим молча.
+
+    Подписка продлевается, а не перезаписывается: `max(now, expires_at) + days` —
+    иначе оплата поверх активной подписки сожгла бы остаток срока. Пакет только
+    добавляет вопросы и `plan` не трогает: иначе покупка пакета обнулила бы
+    действующую подписку.
+    """
+    plan = PLANS.get(plan_key)
+    if plan is None:
+        raise ValueError(f"неизвестный тариф: {plan_key}")
+
+    moment = now or datetime.now(timezone.utc)
+    stamp = moment.isoformat()
+
+    with conn() as c:
+        inserted = c.execute(
+            "INSERT OR IGNORE INTO payments (charge_id, user_id, plan, stars, paid_at) "
+            "VALUES (?,?,?,?,?)",
+            (charge_id, user_id, plan_key, stars, stamp),
+        ).rowcount
+        if not inserted:
+            return False
+
+        if plan.is_subscription:
+            row = c.execute(
+                "SELECT expires_at FROM entitlements WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            current = (row["expires_at"] if row else None) or stamp
+            base = max(datetime.fromisoformat(current), moment)
+            c.execute(
+                "INSERT INTO entitlements (user_id, plan, expires_at, updated_at) "
+                "VALUES (?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET "
+                "plan = excluded.plan, expires_at = excluded.expires_at, "
+                "updated_at = excluded.updated_at",
+                (user_id, plan_key, (base + timedelta(days=plan.days)).isoformat(), stamp),
+            )
+        else:
+            c.execute(
+                "INSERT INTO entitlements (user_id, questions_left, updated_at) "
+                "VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET "
+                "questions_left = entitlements.questions_left + excluded.questions_left, "
+                "updated_at = excluded.updated_at",
+                (user_id, plan.questions, stamp),
+            )
+    return True
+
+
 # ------------------------------- история ---------------------------------- #
 
 

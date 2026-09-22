@@ -1,4 +1,4 @@
-"""Оплата звёздами: /subscribe, кнопки, sendInvoice (D-01), pre_checkout (D-02)."""
+"""Оплата звёздами: /subscribe и инвойс (D-01), pre_checkout (D-02), выдача (D-03)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from typing import Any
 
 import pytest
 
-from app import geo, llm, texts
+from app import alerts, db, geo, llm, texts
+from app.config import settings
 from app.constants import PLANS, Plan
 from app.handlers import billing
 
@@ -127,3 +128,37 @@ async def test_pre_checkout_touches_no_external_service(
     sent = await feed_pre_checkout("month", 150)
     assert sent[0].data["ok"] is True
     assert time.monotonic() - started < 1.0
+
+
+# --- D-03: выдача доступа -------------------------------------------------- #
+
+
+@pytest.fixture
+def admin(monkeypatch: pytest.MonkeyPatch) -> None:
+    alerts.reset()
+    monkeypatch.setattr(alerts, "settings", dataclasses.replace(settings, admin_ids=(999,)))
+
+
+async def test_successful_payment_grants_access(feed_payment, user_id) -> None:
+    sent = await feed_payment("pack10", "ch-1", 100)
+    ent = db.entitlement_for(user_id)
+    assert ent.source == "questions"
+    assert ent.left == PLANS["pack10"].questions
+    assert sent[0].text == texts.payment_done(PLANS["pack10"], ent)
+
+
+async def test_repeated_payment_grants_once_and_stays_quiet(feed_payment, user_id) -> None:
+    # Telegram присылает то же событие при ретраях и рестарте бота.
+    await feed_payment("pack10", "ch-1", 100)
+    sent = await feed_payment("pack10", "ch-1", 100)
+    assert sent == []
+    assert db.entitlement_for(user_id).left == PLANS["pack10"].questions
+
+
+async def test_unknown_payload_alerts_admin_and_owns_up(feed_payment, admin, user_id) -> None:
+    # Деньги списаны, тариф неизвестен: молчать нельзя ни перед кем.
+    sent = await feed_payment("nope", "ch-9", 100)
+    texts_sent = [s.text for s in sent]
+    assert texts.payment_needs_support("ch-9") in texts_sent
+    assert any("Оплачен неизвестный тариф" in t for t in texts_sent)
+    assert db.entitlement_for(user_id).source == "trial"
