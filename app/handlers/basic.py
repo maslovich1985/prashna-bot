@@ -19,7 +19,7 @@ from aiogram.types import (
     Message,
 )
 
-from .. import db, texts
+from .. import db, llm, texts
 from ..config import settings
 from ..constants import REFERRAL_BONUS, REFERRAL_MAX, TRIAL_QUESTIONS
 from .common import INVITE_CALLBACK, buy_kb, invite_link, main_kb, place_for
@@ -161,8 +161,10 @@ async def stats(msg: Message) -> None:
         # Молчаливый return выглядел как поломка бота, а не как отказ.
         await msg.answer(texts.STATS_DENIED)
         return
-    s = db.stats()
-    await msg.answer("\n".join(f"{k}: {v}" for k, v in s.items()))
+    # Счётчики сбоев LLM живут в памяти процесса и обнуляются рестартом — это
+    # и нужно: они отвечают на вопрос «что происходит сейчас», а не за всё время.
+    rows = {**db.stats(), **llm.failures()}
+    await msg.answer("\n".join(f"{k}: {v}" for k, v in rows.items()))
 
 
 # Кнопки постоянной клавиатуры приходят обычным текстом, поэтому ловим их здесь —

@@ -10,7 +10,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
-from . import db, observability
+from . import db, llm, observability
 from .config import settings
 from .handlers import register
 
@@ -50,6 +50,9 @@ async def run() -> None:
     dp.update.outer_middleware(observability.SentryMiddleware())
     register(dp)
     await bot.set_my_commands(BOT_COMMANDS)
+    # Пинг до старта: путь до Groq может быть закрыт, и знать об этом лучше сразу.
+    # Бота не валим — карта считается и без толкования.
+    await llm.health_check()
     bot_info = await bot.get_me()
     log.info("Бот @%s запущен", bot_info.username)
     await bot.delete_webhook(drop_pending_updates=True)
