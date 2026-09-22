@@ -86,6 +86,19 @@ async def test_other_city_falls_back_to_typing(feed, feed_callback, user_id) -> 
     assert db.get_user(user_id) is None
 
 
+async def test_typing_a_city_still_works(feed, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Кнопки не отменяют ввод руками: FSM после /city по-прежнему ждёт название."""
+
+    async def fake_geocode(query: str):
+        assert query == "Томск"
+        return geo.Place("Томск", 56.5, 84.97, "Asia/Tomsk")
+
+    await feed("/city")
+    monkeypatch.setattr(place.geo, "geocode", fake_geocode)
+    sent = await feed("Томск")
+    assert "Томск" in sent[-1].text
+
+
 async def test_unknown_city_key_does_not_set_anything(feed, feed_callback, user_id) -> None:
     await feed("/city")
     sent = await feed_callback("city:нет-такого")

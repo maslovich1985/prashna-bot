@@ -38,9 +38,9 @@ def cities_kb() -> InlineKeyboardMarkup:
 async def city(msg: Message, state: FSMContext) -> None:
     arg = (msg.text or "").partition(" ")[2].strip()
     if not arg:
-        # Сначала кнопки: выбор из списка не идёт в Nominatim вовсе. Ввод руками
-        # остаётся за «Другой город», геолокация — на reply-клавиатуре рядом.
-        await state.clear()
+        # Кнопки не отменяют ввод руками: FSM по-прежнему ждёт название города,
+        # выбор из списка просто снимает поход в Nominatim.
+        await state.set_state(Form.waiting_city)
         await msg.answer(texts.ASK_CITY, reply_markup=location_kb())
         await msg.answer(texts.PICK_CITY, reply_markup=cities_kb())
         return
