@@ -8,20 +8,41 @@ from aiogram import F, Router
 from aiogram.enums import ChatAction
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from .. import db, geo, texts
+from ..constants import CITIES
 from .common import Form, location_kb, main_kb
 
 router = Router(name="place")
+
+CITY_PREFIX = "city:"
+CITY_OTHER = "city:other"
+
+
+def cities_kb() -> InlineKeyboardMarkup:
+    """Быстрый выбор без геокодера. Два столбца: десять городов читаются одним экраном."""
+    keys = list(CITIES)
+    rows = [
+        [
+            InlineKeyboardButton(text=CITIES[key].name, callback_data=f"{CITY_PREFIX}{key}")
+            for key in keys[i : i + 2]
+        ]
+        for i in range(0, len(keys), 2)
+    ]
+    rows.append([InlineKeyboardButton(text=texts.CITY_OTHER_BUTTON, callback_data=CITY_OTHER)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 @router.message(Command("city"))
 async def city(msg: Message, state: FSMContext) -> None:
     arg = (msg.text or "").partition(" ")[2].strip()
     if not arg:
-        await state.set_state(Form.waiting_city)
+        # Сначала кнопки: выбор из списка не идёт в Nominatim вовсе. Ввод руками
+        # остаётся за «Другой город», геолокация — на reply-клавиатуре рядом.
+        await state.clear()
         await msg.answer(texts.ASK_CITY, reply_markup=location_kb())
+        await msg.answer(texts.PICK_CITY, reply_markup=cities_kb())
         return
     await set_city(msg, arg, state)
 
@@ -65,3 +86,31 @@ async def location(msg: Message, state: FSMContext) -> None:
     )
     await state.clear()
     await msg.answer(texts.location_set(place.lat, place.lon, place.tz), reply_markup=main_kb())
+
+
+@router.callback_query(F.data == CITY_OTHER)
+async def city_other(call: CallbackQuery, state: FSMContext) -> None:
+    await call.answer()
+    await state.set_state(Form.waiting_city)
+    if call.message is not None:
+        await call.message.answer(texts.ASK_CITY)
+
+
+@router.callback_query(F.data.startswith(CITY_PREFIX))
+async def city_chosen(call: CallbackQuery, state: FSMContext) -> None:
+    city = CITIES.get((call.data or "").removeprefix(CITY_PREFIX))
+    if city is None or call.message is None:
+        # Кнопка из старого сообщения, список городов с тех пор поменяли.
+        await call.answer(texts.CITY_GONE, show_alert=True)
+        return
+    db.upsert_user(
+        call.from_user.id,
+        call.from_user.username,
+        place=city.name,
+        lat=city.lat,
+        lon=city.lon,
+        tz=city.tz,
+    )
+    await state.clear()
+    await call.answer()
+    await call.message.edit_text(texts.city_set(city.name, city.lat, city.lon, city.tz))

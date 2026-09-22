@@ -40,3 +40,30 @@ PLANS: dict[str, Plan] = {
     "year": Plan(title="Подписка на год", days=365, daily_limit=10),
     "pack10": Plan(title="10 вопросов", days=0, questions=10),
 }
+
+
+@dataclass(frozen=True)
+class City:
+    """Город из быстрого списка: координаты и tz зашиты, геокодер не нужен."""
+
+    name: str
+    lat: float
+    lon: float
+    tz: str
+
+
+# Десять самых населённых городов России. Ключ уезжает в callback_data, поэтому
+# он латиницей и коротким. Координаты — центр города; для лагны этой точности
+# достаточно: разница в пару километров двигает асцендент на доли минуты дуги.
+CITIES: dict[str, City] = {
+    "msk": City("Москва", 55.7558, 37.6173, "Europe/Moscow"),
+    "spb": City("Санкт-Петербург", 59.9311, 30.3609, "Europe/Moscow"),
+    "nsk": City("Новосибирск", 55.0084, 82.9357, "Asia/Novosibirsk"),
+    "ekb": City("Екатеринбург", 56.8389, 60.6057, "Asia/Yekaterinburg"),
+    "kzn": City("Казань", 55.7963, 49.1088, "Europe/Moscow"),
+    "nnv": City("Нижний Новгород", 56.3269, 44.0059, "Europe/Moscow"),
+    "chl": City("Челябинск", 55.1644, 61.4368, "Asia/Yekaterinburg"),
+    "kya": City("Красноярск", 56.0153, 92.8932, "Asia/Krasnoyarsk"),
+    "sam": City("Самара", 53.1959, 50.1002, "Europe/Samara"),
+    "ufa": City("Уфа", 54.7388, 55.9721, "Asia/Yekaterinburg"),
+}
