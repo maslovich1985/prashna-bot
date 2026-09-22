@@ -248,3 +248,9 @@ def feed_payment(bot: Bot, dp: Dispatcher, session: FakeSession):
         return session.sent[before:]
 
     return _feed
+
+
+@pytest.fixture
+def with_place(user_id: int) -> None:
+    """Сохранённое место. Без него прашна-путь отвечает «укажите место» (F-07)."""
+    db_module.upsert_user(user_id, "tester", place="Томск", lat=56.5, lon=84.97, tz="Asia/Tomsk")

@@ -17,6 +17,11 @@ def clean_dedup() -> None:
     alerts.reset()
 
 
+@pytest.fixture(autouse=True)
+def place_is_set(with_place) -> None:
+    """Прашна-путь требует сохранённого места (F-07)."""
+
+
 @pytest.fixture
 def admins(monkeypatch: pytest.MonkeyPatch) -> tuple[int, ...]:
     ids = (901, 902)

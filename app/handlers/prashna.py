@@ -24,6 +24,7 @@ from ..config import settings
 from ..constants import CONSULT_PRICE_MAX, CONSULT_PRICE_MIN
 from ..geo import Place
 from .common import buy_kb, place_for
+from .place import cities_kb
 
 log = logging.getLogger(__name__)
 router = Router(name="prashna")
@@ -82,6 +83,12 @@ async def prashna(msg: Message, state: FSMContext) -> None:
     # Место нужно для лагны, поэтому геоданные берём до резерва: иначе их сбой
     # списал бы квант ни за что.
     place = await place_for(msg.from_user.id)
+    if place is None:
+        # Место определяет лагну, то есть ответ. Молча подставить Москву — брак:
+        # человек получил бы карту чужого города и не узнал об этом. Проверка до
+        # reserve, поэтому квант не списывается.
+        await msg.answer(texts.NO_PLACE, reply_markup=cities_kb())
+        return
 
     res, reason = db.reserve(msg.from_user.id, settings.cooldown_seconds)
     if res is None:
