@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from . import observability
 from .config import settings
 
 log = logging.getLogger(__name__)
@@ -96,6 +97,81 @@ def timeout_for(proxy: str | None) -> float:
     return float(min(settings.llm_proxy_timeout, settings.groq_timeout))
 
 
+# --- счётчики сбоев (H-02) -------------------------------------------------- #
+
+# Кто виноват: сам прокси или Groq за ним. Без разделения в логах видно только
+# «LLM недоступен», и чинить начинают не то.
+PROXY = "прокси"
+GROQ = "groq"
+
+# Тип сбоя. 429 и 5xx приходят уже от Groq, поэтому у прокси их не бывает.
+TIMEOUT = "таймаут"
+CONNECT = "соединение"
+RATE_LIMIT = "429"
+SERVER = "5xx"
+OTHER = "прочее"
+
+_failures: dict[tuple[str, str], int] = {}
+
+
+def note_failure(source: str, kind: str) -> None:
+    _failures[(source, kind)] = _failures.get((source, kind), 0) + 1
+    observability.tag_llm_failure(source, kind)
+
+
+def failures() -> dict[str, int]:
+    """Снимок счётчиков: «прокси/таймаут» → сколько раз. Живёт в памяти процесса."""
+    return {f"{source}/{kind}": n for (source, kind), n in sorted(_failures.items())}
+
+
+def reset_failures() -> None:
+    """Нужен тестам; в боте счётчики обнуляет только рестарт."""
+    _failures.clear()
+
+
+def classify(error: Exception, proxy: str | None) -> tuple[str, str]:
+    """Кому выставлять счёт за сбой.
+
+    Таймаут и обрыв через прокси пишем на прокси: его окно короче `GROQ_TIMEOUT`,
+    и до Groq запрос мог вовсе не дойти. Без прокси виноват сам Groq.
+    """
+    source = PROXY if proxy is not None else GROQ
+    if isinstance(error, httpx.ProxyError):
+        return PROXY, CONNECT
+    if isinstance(error, httpx.TimeoutException):
+        return source, TIMEOUT
+    if isinstance(error, httpx.TransportError):
+        return source, CONNECT
+    if isinstance(error, httpx.HTTPStatusError):
+        # Ответ пришёл — значит, прокси отработал, а ругается Groq. Сам объект
+        # ответа может быть не заполнен (стабы в тестах), поэтому через getattr.
+        status = getattr(getattr(error, "response", None), "status_code", 0)
+        return GROQ, SERVER if status >= 500 else OTHER
+    return source, OTHER
+
+
+async def health_check() -> bool:
+    """Пинг при старте: жив ли путь до Groq. Бота не валит — карта считается и без LLM."""
+    url = settings.groq_base_url.rstrip("/") + "/models"
+    headers = {"Authorization": f"Bearer {settings.groq_api_key}"}
+    for proxy in proxy_chain():
+        try:
+            async with httpx.AsyncClient(timeout=10, proxy=proxy) as client:
+                r = await client.get(url, headers=headers)
+            if r.status_code < 400:
+                log.info("LLM доступен через %s", proxy or "прямое соединение")
+                return True
+            log.warning(
+                "LLM через %s отвечает HTTP %s", proxy or "прямое соединение", r.status_code
+            )
+        except Exception as e:
+            source, kind = classify(e, proxy)
+            note_failure(source, kind)
+            log.warning("LLM недоступен через %s: %s", proxy or "прямое соединение", e)
+    log.warning("Ни один канал до Groq не отвечает: толкования не будут выдаваться")
+    return False
+
+
 def build_user_prompt(
     question: str, house: int, house_meaning: str, chart_text: str, factors: list[str]
 ) -> str:
@@ -151,6 +227,7 @@ async def interpret(
                 raise LLMAuthError(f"Groq отверг ключ: HTTP {r.status_code}")
             if r.status_code == 429:
                 rate_limited = True
+                note_failure(GROQ, RATE_LIMIT)
                 wait = float(r.headers.get("retry-after", 5))
                 log.warning("Groq rate limit, ждём %.1f с", wait)
                 await asyncio.sleep(min(wait, 20))
@@ -162,11 +239,13 @@ async def interpret(
         except httpx.TimeoutException as e:
             timed_out = True
             last_err = e
+            note_failure(*classify(e, proxy))
             log.warning("Таймаут через %s (попытка %d)", proxy or "прямое соединение", attempt + 1)
             await _backoff(attempt, chain)
         except Exception as e:
             timed_out = False
             last_err = e
+            note_failure(*classify(e, proxy))
             log.warning(
                 "Ошибка запроса через %s (попытка %d): %s",
                 proxy or "прямое соединение",

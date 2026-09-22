@@ -71,3 +71,11 @@ class SentryMiddleware(BaseMiddleware):
             scope.set_tag("user_id", user.id if user else None)
             scope.set_tag("command", event_name(message))
             return await handler(event, data)
+
+
+def tag_llm_failure(source: str, kind: str) -> None:
+    """Помечает сбой LLM в Sentry. Без DSN это no-op: счётчики и логи работают и так."""
+    if not settings.sentry_dsn:
+        return
+    sentry_sdk.set_tag("llm_source", source)
+    sentry_sdk.set_tag("llm_failure", kind)
