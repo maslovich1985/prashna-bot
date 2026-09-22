@@ -25,6 +25,7 @@ BOT_COMMANDS = [
     BotCommand(command="history", description="Последние вопросы"),
     BotCommand(command="forget", description="Очистить историю вопросов"),
     BotCommand(command="privacy", description="Что хранится и кому передаётся"),
+    BotCommand(command="delete_me", description="Удалить все мои данные"),
     BotCommand(command="terms", description="Что продаётся и как с возвратом"),
     BotCommand(command="paysupport", description="Поддержка по платежам"),
 ]
