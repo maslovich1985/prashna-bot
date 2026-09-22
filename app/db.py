@@ -545,6 +545,10 @@ def _pay_referral(c: sqlite3.Connection, user_id: int) -> int | None:
         "UPDATE users SET referral_paid = 1, updated_at = ? WHERE user_id = ?", (_now(), user_id)
     )
     c.execute(
+        "INSERT INTO referral_payouts (invitee_id, referrer_id, paid_at) VALUES (?,?,?)",
+        (user_id, referrer_id, _now()),
+    )
+    c.execute(
         "INSERT INTO entitlements (user_id, questions_left, updated_at) VALUES (?,?,?) "
         "ON CONFLICT(user_id) DO UPDATE SET "
         "questions_left = entitlements.questions_left + excluded.questions_left, "
