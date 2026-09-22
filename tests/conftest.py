@@ -15,7 +15,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.base import BaseSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Chat, Location, Message, Update, User
+from aiogram.types import CallbackQuery, Chat, Location, Message, Update, User
 
 from app import db as db_module
 from app.config import settings
@@ -155,6 +155,28 @@ def feed(bot: Bot, dp: Dispatcher, session: FakeSession):
         update = Update(
             update_id=next(_message_ids),
             message=make_message(text, user_id=user_id, location=location),
+        )
+        await dp.feed_update(bot, update)
+        return session.sent[before:]
+
+    return _feed
+
+
+@pytest.fixture
+def feed_callback(bot: Bot, dp: Dispatcher, session: FakeSession):
+    """То же для нажатия инлайн-кнопки: апдейт с callback_query."""
+
+    async def _feed(data: str, user_id: int = USER_ID) -> list[Sent]:
+        before = len(session.sent)
+        update = Update(
+            update_id=next(_message_ids),
+            callback_query=CallbackQuery(
+                id=str(next(_message_ids)),
+                from_user=User(id=user_id, is_bot=False, first_name="Тест", username="tester"),
+                chat_instance="test",
+                message=make_message(user_id=user_id),
+                data=data,
+            ),
         )
         await dp.feed_update(bot, update)
         return session.sent[before:]

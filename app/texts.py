@@ -4,6 +4,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .constants import Plan
+
 WELCOME = (
     "🕉 <b>Прашна-бот</b> — ведическая хорарная астрология.\n\n"
     "Прашна — это карта на <i>момент вопроса</i>. Ответ даёт не бот, а положение планет "
@@ -207,3 +212,25 @@ def delivery_failed(pid: int) -> str:
 
 def prashna_footer(pid: int, left: str) -> str:
     return f"Полная карта: <code>/chart {pid}</code> · осталось сегодня: {left}"
+
+
+SUBSCRIBE_HEADER = "⭐️ <b>Доступ к прашне</b>\n\nОплата — звёздами Telegram. Выберите тариф:"
+
+SALES_CLOSED = (
+    "Продажи пока не открыты — цены ещё не назначены. "
+    "Пробные вопросы и текущий остаток показывает /me."
+)
+
+PLAN_GONE = "Этот тариф больше не продаётся. Откройте /subscribe заново."
+
+
+def plan_button(title: str, stars: int | None) -> str:
+    """Подпись кнопки тарифа. Вызывается только для тарифов с проставленной ценой."""
+    return f"{title} — {stars} ⭐️"
+
+
+def plan_description(plan: Plan) -> str:
+    """Описание в инвойсе: чем тариф отличается, без повтора цены — её показывает Telegram."""
+    if plan.is_subscription:
+        return f"{plan.days} дней, до {plan.daily_limit} вопросов в сутки."
+    return f"{plan.questions} вопросов без ограничения по сроку."
