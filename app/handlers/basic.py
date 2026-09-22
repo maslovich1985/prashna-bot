@@ -88,7 +88,7 @@ async def chart_cmd(msg: Message) -> None:
 @router.message(Command("forget"))
 async def forget(msg: Message) -> None:
     n = db.clear_history(msg.from_user.id)
-    await msg.answer(texts.forgotten(n))
+    await msg.answer(texts.history_cleared(n))
 
 
 @router.message(Command("stats"))
