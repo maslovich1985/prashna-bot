@@ -25,6 +25,7 @@ EXPECTED_ORDER = [
     "terms",
     "paysupport",
     "successful_payment",
+    "refund",
     # place
     "city",
     "city_input",

@@ -556,6 +556,54 @@ def grant(
     return True
 
 
+def get_payment(charge_id: str) -> dict[str, Any] | None:
+    with conn() as c:
+        row = c.execute("SELECT * FROM payments WHERE charge_id = ?", (charge_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def refund(charge_id: str, now: datetime | None = None) -> bool:
+    """Отзывает выданное за платёж и помечает его возвращённым. `False` — уже возвращён.
+
+    Деньги возвращает Telegram, эта функция — только про доступ. Отзыв зеркалит
+    выдачу: у подписки вычитаются те же `days`, у пакета — те же `questions`.
+    Ниже нуля не уходим: часть вопросов пользователь мог уже потратить.
+    """
+    payment = get_payment(charge_id)
+    if payment is None:
+        raise ValueError(f"платёж не найден: {charge_id}")
+    if payment["refunded_at"]:
+        return False
+
+    plan = PLANS.get(payment["plan"])
+    if plan is None:
+        raise ValueError(f"неизвестный тариф в платеже {charge_id}: {payment['plan']}")
+
+    moment = now or datetime.now(timezone.utc)
+    stamp = moment.isoformat()
+    user_id = payment["user_id"]
+
+    with conn() as c:
+        c.execute("UPDATE payments SET refunded_at = ? WHERE charge_id = ?", (stamp, charge_id))
+        if plan.is_subscription:
+            row = c.execute(
+                "SELECT expires_at FROM entitlements WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            current = (row["expires_at"] if row else None) or stamp
+            revoked = datetime.fromisoformat(current) - timedelta(days=plan.days)
+            c.execute(
+                "UPDATE entitlements SET expires_at = ?, updated_at = ? WHERE user_id = ?",
+                (revoked.isoformat(), stamp, user_id),
+            )
+        else:
+            c.execute(
+                "UPDATE entitlements SET questions_left = MAX(questions_left - ?, 0), "
+                "updated_at = ? WHERE user_id = ?",
+                (plan.questions, stamp, user_id),
+            )
+    return True
+
+
 # ------------------------------- история ---------------------------------- #
 
 
