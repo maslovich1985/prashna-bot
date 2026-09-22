@@ -51,13 +51,28 @@ def _sellable(key: str) -> Plan | None:
     return plan if plan is not None and plan.sellable else None
 
 
-@router.message(Command("subscribe"))
-async def subscribe(msg: Message) -> None:
+BUY_CALLBACK = "balance:buy"
+
+
+async def show_plans(msg: Message) -> None:
+    """Список тарифов. Общий для /subscribe и кнопки «Купить» на экране «Баланс»."""
     kb = plans_kb()
     if not kb.inline_keyboard:
         await msg.answer(texts.SALES_CLOSED)
         return
     await msg.answer(texts.SUBSCRIBE_HEADER, reply_markup=kb)
+
+
+@router.message(Command("subscribe"))
+async def subscribe(msg: Message) -> None:
+    await show_plans(msg)
+
+
+@router.callback_query(F.data == BUY_CALLBACK)
+async def buy_from_balance(call: CallbackQuery) -> None:
+    await call.answer()
+    if call.message is not None:
+        await show_plans(call.message)
 
 
 @router.message(Command("terms"))

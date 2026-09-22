@@ -21,9 +21,21 @@ from aiogram.types import (
 
 from .. import db, texts
 from ..config import settings
+from ..constants import TRIAL_QUESTIONS
+from .billing import BUY_CALLBACK
 from .common import main_kb, place_for
 
 router = Router(name="basic")
+
+
+def buy_kb() -> InlineKeyboardMarkup:
+    # Кнопку обрабатывает billing: продажами владеет он, экран баланса только зовёт.
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=texts.BALANCE_BUY_BUTTON, callback_data=BUY_CALLBACK)]
+        ]
+    )
+
 
 HELP_PREFIX = "help:"
 
@@ -157,7 +169,10 @@ async def ask_button(msg: Message, state: FSMContext) -> None:
 @router.message(F.text == texts.BTN_BALANCE)
 async def balance_button(msg: Message, state: FSMContext) -> None:
     await state.clear()
-    await me(msg)
+    ent = db.entitlement_for(msg.from_user.id)
+    row = db.get_entitlement(msg.from_user.id) or {}
+    used = int(row.get("trial_used") or 0)
+    await msg.answer(texts.balance(ent, used, TRIAL_QUESTIONS), reply_markup=buy_kb())
 
 
 @router.message(F.text == texts.BTN_HISTORY)

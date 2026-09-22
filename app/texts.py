@@ -467,3 +467,36 @@ def chart_filename(pid: int) -> str:
 
 def chart_caption(pid: int) -> str:
     return f"Прашна #{pid}"
+
+
+BALANCE_BUY_BUTTON = "⭐️ Купить"
+
+
+def balance(ent: Entitlement, trial_used: int, trial_total: int) -> str:
+    """Экран «Баланс»: что доступно и на сколько хватит. Цифры — из `entitlement_for`.
+
+    `/me` остаётся техническим: место, координаты, аянамша.
+    """
+    if ent.source == "admin":
+        body = "Доступ администратора: без ограничений."
+    elif ent.source == "subscription":
+        until = (
+            datetime.fromisoformat(ent.expires_at).strftime("%d.%m.%Y") if ent.expires_at else "—"
+        )
+        body = (
+            f"Подписка активна до <b>{until}</b>.\n"
+            f"Осталось сегодня: <b>{ent.left}</b> из {ent.daily_limit}."
+        )
+    elif ent.source == "questions":
+        body = f"Оплаченных вопросов в запасе: <b>{ent.left}</b>. Срок не ограничен."
+    elif ent.source == "trial":
+        body = (
+            f"Пробные вопросы: <b>{trial_used} из {trial_total}</b> использовано.\n"
+            f"Осталось: <b>{ent.left}</b>."
+        )
+    else:
+        body = (
+            f"Пробные вопросы закончились: {trial_used} из {trial_total}.\n"
+            "Чтобы продолжить, нужен доступ."
+        )
+    return f"💫 <b>Баланс</b>\n\n{body}\n\nМесто и настройки расчёта — /me."
