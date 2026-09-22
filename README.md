@@ -259,6 +259,7 @@ journalctl --vacuum-size=200M
 | `DAILY_LIMIT` | `5` | Прашн на пользователя в сутки |
 | `COOLDOWN_SECONDS` | `30` | Пауза между вопросами |
 | `ADMIN_IDS` | — | ID админов через запятую (доступ к `/stats`) |
+| `SUPPORT_CONTACT` | — | Контакт в `/paysupport`: `@username` или почта. Пусто — команда отвечает правилами возврата без контакта |
 | `DEFAULT_CITY` / `DEFAULT_LAT` / `DEFAULT_LON` / `DEFAULT_TZ` | Москва | Место, если пользователь не задал своё |
 | `GEOCODER_URL` | Nominatim | Можно заменить на свой инстанс Nominatim |
 | `GEOCODER_UA` | — | User-Agent с контактом — требование Nominatim |

@@ -60,6 +60,10 @@ class Settings:
 
     ayanamsa: str = os.getenv("AYANAMSA", "LAHIRI")
 
+    # Контакт поддержки для /paysupport: @username или адрес почты.
+    # Пусто — команда отвечает правилами возврата без контакта.
+    support_contact: str = os.getenv("SUPPORT_CONTACT", "")
+
 
 settings = Settings()
 

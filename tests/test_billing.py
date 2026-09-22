@@ -162,3 +162,37 @@ async def test_unknown_payload_alerts_admin_and_owns_up(feed_payment, admin, use
     assert texts.payment_needs_support("ch-9") in texts_sent
     assert any("Оплачен неизвестный тариф" in t for t in texts_sent)
     assert db.entitlement_for(user_id).source == "trial"
+
+
+# --- D-04: /terms и /paysupport -------------------------------------------- #
+
+
+async def test_terms_explains_what_is_sold(feed) -> None:
+    sent = await feed("/terms")
+    assert sent[0].text == texts.TERMS
+    # Главное правило прашны: возврат не покупает другой ответ.
+    assert "возврат" in texts.TERMS.lower()
+
+
+async def test_paysupport_shows_configured_contact(feed, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        billing, "settings", dataclasses.replace(settings, support_contact="@owner")
+    )
+    sent = await feed("/paysupport")
+    assert "@owner" in sent[0].text
+
+
+async def test_paysupport_works_without_contact(feed, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Без SUPPORT_CONTACT команда обязана ответить правилами, а не пустотой.
+    monkeypatch.setattr(billing, "settings", dataclasses.replace(settings, support_contact=""))
+    sent = await feed("/paysupport")
+    assert "Контакт:" not in sent[0].text
+    assert "/terms" in sent[0].text
+
+
+def test_payment_commands_are_in_the_menu() -> None:
+    from app import bot as bot_module
+
+    commands = [c.command for c in bot_module.BOT_COMMANDS]
+    assert "terms" in commands
+    assert "paysupport" in commands
