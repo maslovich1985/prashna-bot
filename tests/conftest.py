@@ -15,7 +15,16 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.base import BaseSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import CallbackQuery, Chat, Location, Message, PreCheckoutQuery, Update, User
+from aiogram.types import (
+    CallbackQuery,
+    Chat,
+    Location,
+    Message,
+    PreCheckoutQuery,
+    SuccessfulPayment,
+    Update,
+    User,
+)
 
 from app import db as db_module
 from app.config import settings
@@ -129,7 +138,10 @@ def dp() -> Dispatcher:
 
 
 def make_message(
-    text: str | None = None, user_id: int = USER_ID, location: Location | None = None
+    text: str | None = None,
+    user_id: int = USER_ID,
+    location: Location | None = None,
+    successful_payment: SuccessfulPayment | None = None,
 ) -> Message:
     return Message(
         message_id=next(_message_ids),
@@ -138,6 +150,7 @@ def make_message(
         from_user=User(id=user_id, is_bot=False, first_name="Тест", username="tester"),
         text=text,
         location=location,
+        successful_payment=successful_payment,
     )
 
 
@@ -201,6 +214,35 @@ def feed_pre_checkout(bot: Bot, dp: Dispatcher, session: FakeSession):
                 total_amount=total_amount,
                 invoice_payload=payload,
             ),
+        )
+        await dp.feed_update(bot, update)
+        return session.sent[before:]
+
+    return _feed
+
+
+@pytest.fixture
+def feed_payment(bot: Bot, dp: Dispatcher, session: FakeSession):
+    """Апдейт successful_payment: деньги уже списаны, доступ ещё не выдан."""
+
+    async def _feed(
+        payload: str,
+        charge_id: str,
+        total_amount: int,
+        currency: str = "XTR",
+        user_id: int = USER_ID,
+    ) -> list[Sent]:
+        before = len(session.sent)
+        payment = SuccessfulPayment(
+            currency=currency,
+            total_amount=total_amount,
+            invoice_payload=payload,
+            telegram_payment_charge_id=charge_id,
+            provider_payment_charge_id=charge_id,
+        )
+        update = Update(
+            update_id=next(_message_ids),
+            message=make_message(user_id=user_id, successful_payment=payment),
         )
         await dp.feed_update(bot, update)
         return session.sent[before:]

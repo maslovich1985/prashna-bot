@@ -22,6 +22,7 @@ EXPECTED_ORDER = [
     "stats",
     # billing
     "subscribe",
+    "successful_payment",
     # place
     "city",
     "city_input",

@@ -4,10 +4,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .constants import Plan
+    from .db import Entitlement
 
 WELCOME = (
     "🕉 <b>Прашна-бот</b> — ведическая хорарная астрология.\n\n"
@@ -237,3 +239,30 @@ def plan_description(plan: Plan) -> str:
 
 
 CHECKOUT_AMOUNT_MISMATCH = "Сумма платежа не совпала с тарифом. Откройте /subscribe заново."
+
+
+def payment_done(plan: Plan, ent: Entitlement) -> str:
+    """Подтверждение оплаты: что куплено и что теперь доступно."""
+    if plan.is_subscription and ent.expires_at:
+        until = datetime.fromisoformat(ent.expires_at).strftime("%d.%m.%Y")
+        state = f"Подписка действует до {until}, до {plan.daily_limit} вопросов в сутки."
+    else:
+        state = f"Вопросов в запасе: {ent.left}."
+    return f"✅ <b>Оплата получена</b>\n\n{plan.title}. {state}"
+
+
+def payment_needs_support(charge_id: str) -> str:
+    return (
+        "⚠️ <b>Оплата прошла, но доступ не выдан</b>\n\n"
+        f"Номер платежа: <code>{charge_id}</code>\n\n"
+        "Напишите в /paysupport с этим номером — разберёмся вручную."
+    )
+
+
+def alert_unknown_plan(user_id: int, payload: str, charge_id: str) -> str:
+    return (
+        "🚨 <b>Оплачен неизвестный тариф</b>\n"
+        f"Пользователь {user_id}, payload: <code>{payload}</code>\n"
+        f"Платёж: <code>{charge_id}</code>\n"
+        "Деньги списаны, доступ не выдан — нужна ручная выдача или возврат."
+    )
