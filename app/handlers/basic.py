@@ -22,19 +22,9 @@ from aiogram.types import (
 from .. import db, texts
 from ..config import settings
 from ..constants import TRIAL_QUESTIONS
-from .billing import BUY_CALLBACK
-from .common import main_kb, place_for
+from .common import buy_kb, main_kb, place_for
 
 router = Router(name="basic")
-
-
-def buy_kb() -> InlineKeyboardMarkup:
-    # Кнопку обрабатывает billing: продажами владеет он, экран баланса только зовёт.
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=texts.BALANCE_BUY_BUTTON, callback_data=BUY_CALLBACK)]
-        ]
-    )
 
 
 HELP_PREFIX = "help:"

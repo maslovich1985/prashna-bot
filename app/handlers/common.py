@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 
 from .. import db, geo, texts
+from .billing import BUY_CALLBACK
 
 
 class Form(StatesGroup):
@@ -38,3 +44,12 @@ async def place_for(user_id: int) -> geo.Place:
     if u and u.get("lat") is not None and u.get("lon") is not None:
         return geo.Place(u.get("place") or "—", u["lat"], u["lon"], u.get("tz") or "UTC")
     return geo.default_place()
+
+
+def buy_kb() -> InlineKeyboardMarkup:
+    """Кнопку обрабатывает billing: продажами владеет он, экраны только зовут."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=texts.BALANCE_BUY_BUTTON, callback_data=BUY_CALLBACK)]
+        ]
+    )
