@@ -10,7 +10,7 @@ import pytest
 
 from app import db, geo, llm, texts
 from app.constants import TRIAL_QUESTIONS
-from app.handlers import basic
+from app.handlers import billing
 
 
 @pytest.fixture(autouse=True)
@@ -78,12 +78,12 @@ async def test_admin_sees_unlimited(feed, user_id, monkeypatch: pytest.MonkeyPat
 async def test_balance_offers_a_buy_button(feed) -> None:
     sent = await feed(texts.BTN_BALANCE)
     kb = sent[0].data["reply_markup"]["inline_keyboard"]
-    assert kb[0][0]["callback_data"] == basic.BUY_CALLBACK
+    assert kb[0][0]["callback_data"] == billing.BUY_CALLBACK
 
 
 async def test_buy_button_opens_the_plans(feed, feed_callback) -> None:
     await feed(texts.BTN_BALANCE)
-    sent = await feed_callback(basic.BUY_CALLBACK)
+    sent = await feed_callback(billing.BUY_CALLBACK)
     # Цены пока не проставлены (§15.1), поэтому здесь отказ, а не список тарифов.
     assert any(texts.SALES_CLOSED in s.text for s in sent)
 
