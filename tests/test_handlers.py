@@ -231,8 +231,16 @@ async def test_chart_command_rejects_foreign_id(feed, no_network) -> None:
 async def test_forget_clears_history(feed, no_network) -> None:
     db.save_prashna(USER_ID, "Вопрос?", 10, "Томск", "КАРТА", "ОТВЕТ")
     sent = await feed("/forget")
-    assert sent[-1].text == texts.forgotten(1)
+    assert sent[-1].text == texts.history_cleared(1)
     assert db.history(USER_ID, 10) == []
+
+
+async def test_forget_does_not_promise_full_deletion(feed, no_network, user_id) -> None:
+    """Имя команды обещает больше, чем она делает: ответ обязан назвать границу."""
+    db.grant(user_id, "ch-1", "pack10", 100)
+    sent = await feed("/forget")
+    assert "/delete_me" in sent[-1].text
+    assert db.entitlement_for(user_id).source == "questions"
 
 
 @pytest.mark.parametrize(

@@ -23,7 +23,7 @@ BOT_COMMANDS = [
     BotCommand(command="city", description="Задать место, откуда спрашиваете"),
     BotCommand(command="me", description="Мои настройки и остаток"),
     BotCommand(command="history", description="Последние вопросы"),
-    BotCommand(command="forget", description="Очистить историю"),
+    BotCommand(command="forget", description="Очистить историю вопросов"),
     BotCommand(command="privacy", description="Что хранится и кому передаётся"),
     BotCommand(command="terms", description="Что продаётся и как с возвратом"),
     BotCommand(command="paysupport", description="Поддержка по платежам"),
